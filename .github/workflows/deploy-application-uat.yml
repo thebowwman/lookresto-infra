@@ -187,7 +187,7 @@ jobs:
             cd /opt/app
             
             # Log in to GitHub Container Registry
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
             # Pull new image
             docker pull ghcr.io/thebowwman/lookresto:${{ env.IMAGE_TAG }}
