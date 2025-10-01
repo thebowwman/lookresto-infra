@@ -44,7 +44,7 @@ jobs:
       - name: Get Lightsail IP from SSM
         id: get-ip
         run: |
-          LIGHTSAIL_IP=$(aws ssm get-parameter --name "/default/lightsail/public_ip" --query "Parameter.Value" --output text)
+          LIGHTSAIL_IP=$(aws ssm get-parameter --name "/lightsail/uat/ip" --query "Parameter.Value" --output text)
           echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
           echo "Deploying to: $LIGHTSAIL_IP"
 
@@ -58,7 +58,7 @@ jobs:
       - name: Checkout Backend Repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/lookresto
+          repository: ${{ github.repository_owner }}/lookresto-backend
           token: ${{ secrets.BACKEND_REPO_PAT || github.token }}
           path: backend
 
@@ -96,17 +96,17 @@ jobs:
             cat > /opt/app/.env << 'ENVFILE'
           APP_VERSION=${{ env.IMAGE_TAG }}
           DB_URL=postgres://app:secret@postgres:5432/appdb?sslmode=disable
-          NATS_URL=${{ vars.UAT_NATS_URL || 'nats://nats:4222' }}
+          NATS_URL=${{ secrets.UAT_NATS_URL || 'nats://nats:4222' }}
           APP_PORT=8080
-          GOOGLE_CLIENT_ID=${{ vars.UAT_GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET=${{ vars.UAT_GOOGLE_CLIENT_SECRET }}
-          GOOGLE_REDIRECT_URI=${{ vars.UAT_GOOGLE_REDIRECT_URI }}
-          JWT_SECRET_KEY=${{ vars.UAT_JWT_SECRET_KEY }}
-          ACCESS_TOKEN_TTL=${{ vars.UAT_ACCESS_TOKEN_TTL || '15m' }}
-          REFRESH_TOKEN_TTL=${{ vars.UAT_REFRESH_TOKEN_TTL || '7d' }}
-          ACCOUNT_SID=${{ vars.UAT_TWILIO_ACCOUNT_SID }}
-          TWILIO_TOKEN=${{ vars.UAT_TWILIO_AUTH_TOKEN }}
-          FROM_NUMBER=${{ vars.UAT_TWILIO_PHONE_NUMBER }}
+          GOOGLE_CLIENT_ID=${{ secrets.UAT_GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET=${{ secrets.UAT_GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REDIRECT_URI=${{ secrets.UAT_GOOGLE_REDIRECT_URI }}
+          JWT_SECRET_KEY=${{ secrets.UAT_JWT_SECRET_KEY }}
+          ACCESS_TOKEN_TTL=${{ secrets.UAT_ACCESS_TOKEN_TTL || '15m' }}
+          REFRESH_TOKEN_TTL=${{ secrets.UAT_REFRESH_TOKEN_TTL || '7d' }}
+          ACCOUNT_SID=${{ secrets.UAT_TWILIO_ACCOUNT_SID }}
+          TWILIO_TOKEN=${{ secrets.UAT_TWILIO_AUTH_TOKEN }}
+          FROM_NUMBER=${{ secrets.UAT_TWILIO_PHONE_NUMBER }}
           ENVFILE
           EOF
 
@@ -117,9 +117,7 @@ jobs:
             cd /opt/app
             
             # Start base services first (nats, redis)
-            docker compose -f docker-compose.base.yml -f docker-compose.uat.yml up postgres nats redis -d
-            
-
+            docker compose -f docker-compose.base.yml -f docker-compose.uat.yml up postgres redis nats -d
             
             echo "⏳ Waiting for services to be ready..."
             
@@ -188,11 +186,14 @@ jobs:
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << EOF
             cd /opt/app
             
+            # Log in to GitHub Container Registry
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
             # Pull new image
             docker pull ghcr.io/thebowwman/lookresto:${{ env.IMAGE_TAG }}
             
-            # Start the application (it depends on postgres, nats, redis)
-            docker-compose -f docker-compose.uat.yml up -d app
+            # Start the application with both compose files to resolve dependencies
+            docker compose -f docker-compose.base.yml -f docker-compose.uat.yml up -d app
             
             # Wait for application to start
             echo "⏳ Waiting for application to start..."
@@ -253,6 +254,6 @@ jobs:
           echo "⚠️ Deployment failed, initiating rollback..."
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << 'EOF'
             cd /opt/app
-            docker-compose -f docker-compose.uat.yml down app
-            docker-compose -f docker-compose.uat.yml up -d app
+            docker compose -f docker-compose.uat.yml down app
+            docker compose -f docker-compose.uat.yml up -d app
           EOF
