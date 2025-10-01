@@ -12,8 +12,6 @@ on:
     secrets:
       AWS_EC2_SSH_PRIVATE_KEY:
         required: true
-      GITHUB_TOKEN:
-        required: true
       SLACK_WEBHOOK_URL:
         required: false
 
