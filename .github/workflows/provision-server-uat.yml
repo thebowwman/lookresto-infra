@@ -7,8 +7,15 @@ on:
     inputs:
       lightsail_ip:
         description: 'IP address of the Lightsail instance'
-        required: true
+        required: false
         type: string
+    secrets:
+      AWS_EC2_SSH_PRIVATE_KEY:
+        required: true
+      GITHUB_TOKEN:
+        required: true
+      SLACK_WEBHOOK_URL:
+        required: false
 
 permissions:
   id-token: write
@@ -33,7 +40,12 @@ jobs:
       - name: Get Lightsail IP from SSM
         id: get-ip
         run: |
-          LIGHTSAIL_IP=$(aws ssm get-parameter --name "/default/lightsail/public_ip" --query "Parameter.Value" --output text)
+          # Use input if provided (from workflow_call), otherwise get from SSM
+          if [ -n "${{ inputs.lightsail_ip }}" ]; then
+            LIGHTSAIL_IP="${{ inputs.lightsail_ip }}"
+          else
+            LIGHTSAIL_IP=$(aws ssm get-parameter --name "/default/lightsail/public_ip" --query "Parameter.Value" --output text)
+          fi
           echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
           echo "Target server: $LIGHTSAIL_IP"
 
@@ -82,9 +94,14 @@ jobs:
 
       - name: Copy Docker Compose files
         run: |
-          scp -i ~/.ssh/id_rsa \
-            docker/compose/docker-compose.uat.yml \
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+            $GITHUB_WORKSPACE/docker/compose/docker-compose.uat.yml \
             ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/docker-compose.uat.yml
+          
+          # Also copy other compose files if needed
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+            $GITHUB_WORKSPACE/docker/compose/docker-compose.base.yml \
+            ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/docker-compose.base.yml || true
 
       - name: Verify Docker installation
         run: |
