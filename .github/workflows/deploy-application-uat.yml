@@ -1,4 +1,4 @@
-# .github/workflows/deploy-application-uat.yml
+#.github/workflows/deploy-application-uat.yml
 name: Deploy Application - UAT
 
 on:
