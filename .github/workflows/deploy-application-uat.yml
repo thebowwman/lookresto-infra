@@ -117,10 +117,9 @@ jobs:
             cd /opt/app
             
             # Start base services first (nats, redis)
-            docker compose -f docker-compose.base.yml up -d
+            docker compose -f docker-compose.base.yml -f docker-compose.uat.yml up postgres nats redis -d
             
-            # Start postgres from uat compose
-            docker compose -f docker-compose.uat.yml up -d postgres
+
             
             echo "⏳ Waiting for services to be ready..."
             
