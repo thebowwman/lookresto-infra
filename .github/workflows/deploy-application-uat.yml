@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: UAT
-      url: ${{ secrets.UAT_APP_URL }}
+      url: ${{ vars.UAT_APP_URL }}
     
     steps:
       - name: Checkout repository
