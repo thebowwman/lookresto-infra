@@ -44,7 +44,7 @@ jobs:
       - name: Get Lightsail IP from SSM
         id: get-ip
         run: |
-          LIGHTSAIL_IP=$(aws ssm get-parameter --name "/lightsail/uat/ip" --query "Parameter.Value" --output text)
+          LIGHTSAIL_IP=$(aws ssm get-parameter --name "/default/lightsail/public_ip" --query "Parameter.Value" --output text)
           echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
           echo "Deploying to: $LIGHTSAIL_IP"
 
