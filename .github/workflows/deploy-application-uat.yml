@@ -58,7 +58,7 @@ jobs:
       - name: Checkout Backend Repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/lookresto # Change to your backend repo name
+          repository: ${{ github.repository_owner }}/lookresto
           token: ${{ secrets.BACKEND_REPO_PAT || github.token }}
           path: backend
 
@@ -80,6 +80,78 @@ jobs:
             fi
           done
 
+      - name: Copy Docker Compose files
+        run: |
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+            $GITHUB_WORKSPACE/docker/compose/docker-compose.base.yml \
+            ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/docker-compose.base.yml
+          
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+            $GITHUB_WORKSPACE/docker/compose/docker-compose.uat.yml \
+            ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/docker-compose.uat.yml
+
+      - name: Create .env file on server
+        run: |
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << EOF
+            cat > /opt/app/.env << 'ENVFILE'
+          APP_VERSION=${{ env.IMAGE_TAG }}
+          DB_URL=postgres://app:secret@postgres:5432/appdb?sslmode=disable
+          NATS_URL=${{ secrets.UAT_NATS_URL || 'nats://nats:4222' }}
+          APP_PORT=8080
+          JWT_SECRET_KEY=${{ vars.UAT_JWT_SECRET_KEY }}
+          ACCESS_TOKEN_TTL=${{ vars.UAT_ACCESS_TOKEN_TTL || '15m' }}
+          REFRESH_TOKEN_TTL=${{ vars.UAT_REFRESH_TOKEN_TTL || '7d' }}
+          ACCOUNT_SID=${{ vars.UAT_TWILIO_ACCOUNT_SID }}
+          TWILIO_TOKEN=${{ vars.UAT_TWILIO_AUTH_TOKEN }}
+          FROM_NUMBER=${{ vars.UAT_TWILIO_PHONE_NUMBER }}
+          ENVFILE
+          EOF
+
+      - name: Start Infrastructure Services (Postgres, NATS, Redis)
+        run: |
+          echo "🚀 Starting infrastructure services..."
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << 'EOF'
+            cd /opt/app
+            
+            # Start base services first (nats, redis)
+            docker-compose -f docker-compose.base.yml up -d
+            
+            # Start postgres from uat compose
+            docker-compose -f docker-compose.uat.yml up -d postgres
+            
+            echo "⏳ Waiting for services to be ready..."
+            
+            # Wait for postgres
+            for i in {1..30}; do
+              if docker exec uat-postgres pg_isready -U app; then
+                echo "✅ Postgres is ready!"
+                break
+              fi
+              echo "Waiting for postgres... ($i/30)"
+              sleep 2
+            done
+            
+            # Wait for NATS
+            for i in {1..30}; do
+              if docker exec nats nc -z localhost 4222; then
+                echo "✅ NATS is ready!"
+                break
+              fi
+              echo "Waiting for NATS... ($i/30)"
+              sleep 2
+            done
+            
+            # Wait for Redis
+            for i in {1..30}; do
+              if docker exec redis redis-cli ping | grep -q PONG; then
+                echo "✅ Redis is ready!"
+                break
+              fi
+              echo "Waiting for Redis... ($i/30)"
+              sleep 2
+            done
+          EOF
+
       - name: Run Database Migrations
         if: env.RUN_MIGRATIONS == 'true'
         run: |
@@ -87,19 +159,23 @@ jobs:
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} bash << EOF
             cd /opt/app
             
-            # Export DB_URL to be used in docker commands
-            export DB_URL="${{ vars.UAT_DB_URL }}"
+            # Get the docker compose network name
+            NETWORK=\$(docker network ls --filter name=app --format "{{.Name}}" | head -1)
+            if [ -z "\$NETWORK" ]; then
+              NETWORK="app_default"
+            fi
+            echo "Using network: \$NETWORK"
             
             # Run migrations for each module
-            for module in restaurant kernel notification shared user; do
+            for module in restaurant user kernel notification shared; do
               if [ -d "migrations/\$module" ]; then
                 echo "Running migrations for \$module..."
                 docker run --rm \
-                  --network host \
+                  --network \$NETWORK \
                   -v \$(pwd)/migrations/\$module:/migrations \
                   migrate/migrate:latest \
                   -path=/migrations \
-                  -database "\${DB_URL}?x-migrations-table=\${module}_migrations" up
+                  -database "postgres://app:secret@postgres:5432/appdb?sslmode=disable&x-migrations-table=\${module}_migrations" up
               fi
             done
           EOF
@@ -111,18 +187,17 @@ jobs:
             cd /opt/app
             
             # Pull new image
-            docker pull ghcr.io/${{ github.repository_owner }}/backend:${{ env.IMAGE_TAG }}
+            docker pull ghcr.io/thebowwman/lookresto:${{ env.IMAGE_TAG }}
             
-            # Update docker-compose
-            export BACKEND_IMAGE=ghcr.io/${{ github.repository_owner }}/backend:${{ env.IMAGE_TAG }}
-            export DB_URL="${{ vars.UAT_DB_URL }}"
-            export REDIS_URL="${{ vars.UAT_REDIS_URL }}"
+            # Start the application (it depends on postgres, nats, redis)
+            docker-compose -f docker-compose.uat.yml up -d app
             
-            # Deploy with zero-downtime
-            docker-compose -f docker-compose.uat.yml up -d --no-deps backend
-            
-            # Wait for health check
+            # Wait for application to start
+            echo "⏳ Waiting for application to start..."
             sleep 10
+            
+            # Show running containers
+            docker ps
           EOF
 
       - name: Health Check
@@ -131,8 +206,10 @@ jobs:
           MAX_RETRIES=30
           RETRY_COUNT=0
           
+          HEALTH_URL="http://${{ steps.get-ip.outputs.lightsail_ip }}:8080/health"
+          
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            if curl -sf "${{ secrets.UAT_APP_URL }}/health" > /dev/null; then
+            if curl -sf "$HEALTH_URL" > /dev/null; then
               echo "✅ Health check passed!"
               exit 0
             fi
@@ -150,8 +227,8 @@ jobs:
         run: |
           echo "### ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
           echo "**Environment:** UAT" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** ghcr.io/${{ github.repository_owner }}/backend:${{ env.IMAGE_TAG }}" >> $GITHUB_STEP_SUMMARY
-          echo "**URL:** ${{ secrets.UAT_APP_URL }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** ghcr.io/thebowwman/lookresto:${{ env.IMAGE_TAG }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Server IP:** ${{ steps.get-ip.outputs.lightsail_ip }}" >> $GITHUB_STEP_SUMMARY
           echo "**Deployed by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
 
       - name: Notify Slack
@@ -164,7 +241,7 @@ jobs:
             UAT Deployment: ${{ job.status }}
             Version: ${{ env.IMAGE_TAG }}
             Deployed by: ${{ github.actor }}
-            URL: ${{ secrets.UAT_APP_URL }}
+            Server: ${{ steps.get-ip.outputs.lightsail_ip }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
@@ -174,6 +251,6 @@ jobs:
           echo "⚠️ Deployment failed, initiating rollback..."
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << 'EOF'
             cd /opt/app
-            docker-compose -f docker-compose.uat.yml down
-            docker-compose -f docker-compose.uat.yml up -d
+            docker-compose -f docker-compose.uat.yml down app
+            docker-compose -f docker-compose.uat.yml up -d app
           EOF
