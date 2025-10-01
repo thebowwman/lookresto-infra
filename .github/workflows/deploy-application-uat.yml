@@ -84,19 +84,22 @@ jobs:
         if: env.RUN_MIGRATIONS == 'true'
         run: |
           echo "🔄 Running migrations..."
-          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << 'EOF'
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} bash << EOF
             cd /opt/app
+            
+            # Export DB_URL to be used in docker commands
+            export DB_URL="${{ secrets.UAT_DB_URL }}"
             
             # Run migrations for each module
             for module in restaurant kernel notification shared user; do
-              if [ -d "migrations/$module" ]; then
-                echo "Running migrations for $module..."
+              if [ -d "migrations/\$module" ]; then
+                echo "Running migrations for \$module..."
                 docker run --rm \
                   --network host \
-                  -v $(pwd)/migrations/$module:/migrations \
+                  -v \$(pwd)/migrations/\$module:/migrations \
                   migrate/migrate:latest \
                   -path=/migrations \
-                  -database "${{ secrets.UAT_DB_URL }}?x-migrations-table=${module}_migrations" up
+                  -database "\${DB_URL}?x-migrations-table=\${module}_migrations" up
               fi
             done
           EOF
