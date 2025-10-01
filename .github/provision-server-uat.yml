@@ -1,0 +1,118 @@
+# .github/workflows/provision-server-uat.yml
+name: Provision Server - UAT
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      lightsail_ip:
+        description: 'IP address of the Lightsail instance'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    environment:
+      name: UAT
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::341126269796:role/github-actions-role
+          aws-region: eu-west-3
+
+      - name: Get Lightsail IP from SSM
+        id: get-ip
+        run: |
+          LIGHTSAIL_IP=$(aws ssm get-parameter --name "/lightsail/uat/ip" --query "Parameter.Value" --output text)
+          echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
+          echo "Target server: $LIGHTSAIL_IP"
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AWS_EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ steps.get-ip.outputs.lightsail_ip }} >> ~/.ssh/known_hosts
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible
+
+      - name: Install Ansible Docker collection
+        run: ansible-galaxy collection install community.docker
+
+      - name: Create dynamic inventory
+        run: |
+          cat > ansible/inventory/dynamic_uat <<EOF
+          [uat]
+          uat-server ansible_host=${{ steps.get-ip.outputs.lightsail_ip }}
+          
+          [uat:vars]
+          ansible_user=ubuntu
+          ansible_ssh_private_key_file=~/.ssh/id_rsa
+          ansible_python_interpreter=/usr/bin/python3
+          github_username=${{ github.actor }}
+          github_token=${{ secrets.GITHUB_TOKEN }}
+          EOF
+
+      - name: Test SSH connection
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} 'echo "SSH connection successful"'
+
+      - name: Run Ansible provisioning playbook
+        run: |
+          cd ansible
+          ansible-playbook -i inventory/dynamic_uat provision-server.yml -v
+
+      - name: Copy Docker Compose files
+        run: |
+          scp -i ~/.ssh/id_rsa \
+            docker/compose/docker-compose.uat.yml \
+            ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/docker-compose.uat.yml
+
+      - name: Verify Docker installation
+        run: |
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << 'EOF'
+            docker --version
+            docker-compose --version
+            docker ps
+            ls -la /opt/app
+          EOF
+
+      - name: Provisioning Summary
+        run: |
+          echo "### ✅ Server Provisioning Complete" >> $GITHUB_STEP_SUMMARY
+          echo "**Server IP:** ${{ steps.get-ip.outputs.lightsail_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Docker:** Installed and running" >> $GITHUB_STEP_SUMMARY
+          echo "**App Directory:** /opt/app" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Next step: Deploy application" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        continue-on-error: true
+        with:
+          status: ${{ job.status }}
+          text: |
+            UAT Server Provisioning: ${{ job.status }}
+            IP: ${{ steps.get-ip.outputs.lightsail_ip }}
+            Actor: ${{ github.actor }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
