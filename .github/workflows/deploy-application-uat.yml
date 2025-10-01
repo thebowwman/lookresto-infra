@@ -58,7 +58,7 @@ jobs:
       - name: Checkout Backend Repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/lookresto-backend
+          repository: ${{ github.repository_owner }}/lookresto
           token: ${{ secrets.BACKEND_REPO_PAT || github.token }}
           path: backend
 
