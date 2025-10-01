@@ -1,0 +1,155 @@
+# .github/workflows/deploy-application-uat.yml
+name: Deploy Application - UAT
+
+on:
+  repository_dispatch:
+    types: [deploy-backend]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy (e.g., v1.2.3 or latest)"
+        required: true
+        default: "latest"
+      run_migrations:
+        description: "Run database migrations"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ENVIRONMENT: uat
+  IMAGE_TAG: ${{ github.event.inputs.image_tag || github.event.client_payload.version || 'latest' }}
+  RUN_MIGRATIONS: ${{ github.event.inputs.run_migrations || 'true' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: UAT
+      url: ${{ secrets.UAT_APP_URL }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::341126269796:role/github-actions-role
+          aws-region: eu-west-3
+
+      - name: Get Lightsail IP from SSM
+        id: get-ip
+        run: |
+          LIGHTSAIL_IP=$(aws ssm get-parameter --name "/lightsail/uat/ip" --query "Parameter.Value" --output text)
+          echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
+          echo "Deploying to: $LIGHTSAIL_IP"
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AWS_EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ steps.get-ip.outputs.lightsail_ip }} >> ~/.ssh/known_hosts
+
+      - name: Run Database Migrations
+        if: env.RUN_MIGRATIONS == 'true'
+        run: |
+          echo "🔄 Running migrations..."
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << 'EOF'
+            cd /opt/app
+            docker run --rm \
+              --network host \
+              -v $(pwd)/migrations:/migrations \
+              migrate/migrate:latest \
+              -path=/migrations/restaurant \
+              -database "${{ secrets.UAT_DB_URL }}?x-migrations-table=restaurant_migrations" up
+            
+            # Repeat for other modules
+            docker run --rm \
+              --network host \
+              -v $(pwd)/migrations:/migrations \
+              migrate/migrate:latest \
+              -path=/migrations/kernel \
+              -database "${{ secrets.UAT_DB_URL }}?x-migrations-table=kernel_migrations" up
+            
+            # Add other modules: notification, shared, user
+          EOF
+
+      - name: Deploy Application
+        run: |
+          echo "🚀 Deploying application version: ${{ env.IMAGE_TAG }}"
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << EOF
+            cd /opt/app
+            
+            # Pull new image
+            docker pull ghcr.io/${{ github.repository_owner }}/backend:${{ env.IMAGE_TAG }}
+            
+            # Update docker-compose
+            export BACKEND_IMAGE=ghcr.io/${{ github.repository_owner }}/backend:${{ env.IMAGE_TAG }}
+            export DB_URL="${{ secrets.UAT_DB_URL }}"
+            export REDIS_URL="${{ secrets.UAT_REDIS_URL }}"
+            
+            # Deploy with zero-downtime
+            docker-compose -f docker-compose.uat.yml up -d --no-deps backend
+            
+            # Wait for health check
+            sleep 10
+          EOF
+
+      - name: Health Check
+        run: |
+          echo "🏥 Running health check..."
+          MAX_RETRIES=30
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if curl -sf "${{ secrets.UAT_APP_URL }}/health" > /dev/null; then
+              echo "✅ Health check passed!"
+              exit 0
+            fi
+            
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "⏳ Waiting for application... ($RETRY_COUNT/$MAX_RETRIES)"
+            sleep 5
+          done
+          
+          echo "❌ Health check failed after $MAX_RETRIES attempts"
+          exit 1
+
+      - name: Deployment Summary
+        if: success()
+        run: |
+          echo "### ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** UAT" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** ghcr.io/${{ github.repository_owner }}/backend:${{ env.IMAGE_TAG }}" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** ${{ secrets.UAT_APP_URL }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Deployed by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            UAT Deployment: ${{ job.status }}
+            Version: ${{ env.IMAGE_TAG }}
+            Deployed by: ${{ github.actor }}
+            URL: ${{ secrets.UAT_APP_URL }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          echo "⚠️ Deployment failed, initiating rollback..."
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << 'EOF'
+            cd /opt/app
+            docker-compose -f docker-compose.uat.yml down
+            docker-compose -f docker-compose.uat.yml up -d
+          EOF
