@@ -96,8 +96,11 @@ jobs:
             cat > /opt/app/.env << 'ENVFILE'
           APP_VERSION=${{ env.IMAGE_TAG }}
           DB_URL=postgres://app:secret@postgres:5432/appdb?sslmode=disable
-          NATS_URL=${{ secrets.UAT_NATS_URL || 'nats://nats:4222' }}
+          NATS_URL=${{ vars.UAT_NATS_URL || 'nats://nats:4222' }}
           APP_PORT=8080
+          GOOGLE_CLIENT_ID=${{ vars.UAT_GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET=${{ vars.UAT_GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REDIRECT_URI=${{ vars.UAT_GOOGLE_REDIRECT_URI }}
           JWT_SECRET_KEY=${{ vars.UAT_JWT_SECRET_KEY }}
           ACCESS_TOKEN_TTL=${{ vars.UAT_ACCESS_TOKEN_TTL || '15m' }}
           REFRESH_TOKEN_TTL=${{ vars.UAT_REFRESH_TOKEN_TTL || '7d' }}
@@ -114,10 +117,10 @@ jobs:
             cd /opt/app
             
             # Start base services first (nats, redis)
-            docker-compose -f docker-compose.base.yml up -d
+            docker compose -f docker-compose.base.yml up -d
             
             # Start postgres from uat compose
-            docker-compose -f docker-compose.uat.yml up -d postgres
+            docker compose -f docker-compose.uat.yml up -d postgres
             
             echo "⏳ Waiting for services to be ready..."
             
