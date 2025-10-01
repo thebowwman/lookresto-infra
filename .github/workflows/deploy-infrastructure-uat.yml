@@ -1,0 +1,100 @@
+# .github/workflows/deploy-infrastructure-uat.yml
+name: Deploy Infrastructure - UAT
+
+on:
+  workflow_dispatch:
+    inputs:
+      terraform_action:
+        description: "Terraform action to perform"
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+        default: "plan"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    environment:
+      name: UAT
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::341126269796:role/github-actions-role
+          aws-region: eu-west-3
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0  # Specify your version
+
+      - name: Terraform Init
+        run: terraform -chdir=terraform/lightsail init -reconfigure
+        env:
+          TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
+          TF_VAR_environment: uat
+
+      - name: Terraform Validate
+        run: terraform -chdir=terraform/lightsail validate
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform -chdir=terraform/lightsail plan -out=tfplan
+          terraform -chdir=terraform/lightsail show -no-color tfplan > plan_output.txt
+        env:
+          TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
+          TF_VAR_environment: uat
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform/lightsail/tfplan
+          retention-days: 5
+
+      - name: Terraform Apply
+        if: github.event.inputs.terraform_action == 'apply'
+        run: terraform -chdir=terraform/lightsail apply -auto-approve tfplan
+        env:
+          TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
+          TF_VAR_environment: uat
+
+      - name: Terraform Destroy
+        if: github.event.inputs.terraform_action == 'destroy'
+        run: terraform -chdir=terraform/lightsail destroy -auto-approve
+        env:
+          TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
+          TF_VAR_environment: uat
+
+      - name: Get Infrastructure Outputs
+        if: github.event.inputs.terraform_action == 'apply'
+        id: outputs
+        run: |
+          LIGHTSAIL_IP=$(terraform -chdir=terraform/lightsail output -raw lightsail_ip)
+          echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
+          echo "### Infrastructure Outputs" >> $GITHUB_STEP_SUMMARY
+          echo "**Lightsail IP:** $LIGHTSAIL_IP" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            UAT Infrastructure ${{ github.event.inputs.terraform_action }}: ${{ job.status }}
+            Actor: ${{ github.actor }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
