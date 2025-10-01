@@ -1,0 +1,44 @@
+services:
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: loki
+    command:
+      - -config.file=/etc/loki/config/loki-config.yml
+      - -config.expand-env=true
+    volumes:
+      - ./obs/loki-config.yml:/etc/loki/config/loki-config.yml:ro
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./obs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    command: ["-config.file=/etc/promtail/config/promtail-config.yml"]
+    volumes:
+      - ./obs/promtail-config.yml:/etc/promtail/config/promtail-config.yml:ro
+      - ../logs:/host_logs/restaurant:ro
+    environment:
+      - HOSTNAME=${HOSTNAME:-restaurant-host}
+    user: "0"
+    depends_on: [loki]
+    restart: unless-stopped
+
+volumes:
+  loki_data:
+  grafana_data:

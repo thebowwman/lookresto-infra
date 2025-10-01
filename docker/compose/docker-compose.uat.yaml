@@ -1,0 +1,61 @@
+version: "3.9"
+
+services:
+  app:
+    image: ghcr.io/thebowwman/lookresto:${APP_VERSION:-latest}
+    container_name: myapp
+    environment:
+      DB_URL: ${DB_URL}
+      NATS_URL: ${NATS_URL}
+      APP_PORT: ${APP_PORT}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL}
+      REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL}
+      ACCOUNT_SID: ${ACCOUNT_SID}
+      TWILIO_TOKEN: ${TWILIO_TOKEN}
+      FROM_NUMBER: ${FROM_NUMBER}
+    ports:
+      - "8080:8080"
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../logs:/app/logs
+    restart: unless-stopped
+
+  migrate:
+    image: migrate/migrate:latest
+    volumes:
+      - ../restaurant/migrations:/migrations/restaurant
+      - ../user/migrations:/migrations/user
+      - ../kernel/migrations:/migrations/kernel
+      - ../notification/migrations:/migrations/notification
+      - ../shared/migrations:/migrations/shared
+    networks:
+      - default
+
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: uat-postgres
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: appdb
+    ports:
+      - "5432:5432" # exposed for debugging, optional
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

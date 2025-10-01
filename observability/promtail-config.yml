@@ -1,0 +1,45 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: restaurant-file
+    static_configs:
+      - targets: [ localhost ]
+        labels:
+          job: restaurant
+          host: ${HOSTNAME}
+          __path__: /host_logs/restaurant/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            ts: ts
+            level: level
+            logger: logger
+            msg: msg
+            service: service
+            rid: rid
+            method: method
+            route: route
+            path: path
+            client_ip: client_ip
+            status: status
+            lat_ms: lat_ms
+      - timestamp:
+          source: ts
+          format: RFC3339Nano
+      - labels:               # keep labels low-cardinality
+          level:
+          service:
+          route:
+          method:
+          status:
+          host:
+          component:
+          usecase:

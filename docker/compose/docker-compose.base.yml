@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  nats:
+    image: nats:2.10.14-alpine
+    container_name: nats
+    command:
+      - -js
+      - --store_dir=/data
+    ports:
+      - "4222:4222" # client connections
+      - "8222:8222" # monitoring
+    volumes:
+      - nats_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 4222 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  nats_data:
+  redis_data:
