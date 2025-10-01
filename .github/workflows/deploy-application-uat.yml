@@ -98,15 +98,16 @@ jobs:
           DB_URL=postgres://app:secret@postgres:5432/appdb?sslmode=disable
           NATS_URL=${{ vars.UAT_NATS_URL || 'nats://nats:4222' }}
           APP_PORT=8080
-          GOOGLE_CLIENT_ID=${{ vars.UAT_GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET=${{ vars.UAT_GOOGLE_CLIENT_SECRET }}
-          GOOGLE_REDIRECT_URI=${{ vars.UAT_GOOGLE_REDIRECT_URI }}
-          JWT_SECRET_KEY=${{ vars.UAT_JWT_SECRET_KEY }}
-          ACCESS_TOKEN_TTL=${{ vars.UAT_ACCESS_TOKEN_TTL || '15m' }}
-          REFRESH_TOKEN_TTL=${{ vars.UAT_REFRESH_TOKEN_TTL || '7d' }}
-          ACCOUNT_SID=${{ vars.UAT_TWILIO_ACCOUNT_SID }}
-          TWILIO_TOKEN=${{ vars.UAT_TWILIO_AUTH_TOKEN }}
-          FROM_NUMBER=${{ vars.UAT_TWILIO_PHONE_NUMBER }}
+          REDIS_ADDR='redis:6379'
+          GOOGLE_CLIENT_ID=${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET=${{ vars.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REDIRECT_URI=${{ vars.GOOGLE_REDIRECT_URI }}
+          JWT_SECRET_KEY=${{ vars.JWT_SECRET_KEY }}
+          ACCESS_TOKEN_TTL=${{ vars.ACCESS_TOKEN_TTL || '15m' }}
+          REFRESH_TOKEN_TTL=${{ vars.REFRESH_TOKEN_TTL || '7d' }}
+          ACCOUNT_SID=${{ vars.TWILIO_ACCOUNT_SID }}
+          TWILIO_TOKEN=${{ vars.TWILIO_AUTH_TOKEN }}
+          FROM_NUMBER=${{ vars.TWILIO_PHONE_NUMBER }}
           ENVFILE
           EOF
 
