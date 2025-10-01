@@ -140,7 +140,7 @@ jobs:
             UAT Deployment: ${{ job.status }}
             Version: ${{ env.IMAGE_TAG }}
             Deployed by: ${{ github.actor }}
-            URL: ${{ secrets.UAT_APP_URL }}
+            URL: ${{ vars.UAT_APP_URL }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
