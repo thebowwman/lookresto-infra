@@ -144,12 +144,13 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
- 
+
   deploy-application:
     needs: provision
     if: success() && inputs.deploy_application != false
     uses: ./.github/workflows/deploy-application-uat.yml
     secrets: inherit
     with:
+      lightsail_ip: ${{ needs.provision.outputs.lightsail_ip }}
       image_tag: 'latest'
       run_migrations: true
