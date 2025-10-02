@@ -161,4 +161,4 @@ jobs:
     with:
       lightsail_ip: ${{ needs.terraform.outputs.lightsail_ip }}
       deploy_application: false  # Don't auto-deploy in prod
-  #  secrets: inherit
+    secrets: inherit
