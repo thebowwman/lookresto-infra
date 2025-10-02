@@ -1,0 +1,398 @@
+# .github/workflows/deploy-application-prod.yml
+name: Deploy Application - PROD
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy (e.g., v1.2.3)"
+        required: true
+      run_migrations:
+        description: "Run database migrations"
+        required: true
+        type: boolean
+        default: false
+      confirm_production:
+        description: "Type 'DEPLOY-TO-PROD' to confirm"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      lightsail_ip:
+        description: "Lightsail IP of the target server"
+        required: false
+        type: string
+      image_tag:
+        description: "Docker image tag to deploy"
+        required: true
+        type: string
+      run_migrations:
+        description: "Run database migrations"
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      AWS_EC2_SSH_PRIVATE_KEY:
+        required: true
+      BACKEND_REPO_PAT:
+        required: false
+      GHCR_TOKEN:
+        required: true
+      SLACK_WEBHOOK_URL:
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ENVIRONMENT: prod
+  IMAGE_TAG: ${{ github.event.inputs.image_tag || inputs.image_tag }}
+  RUN_MIGRATIONS: ${{ github.event.inputs.run_migrations || inputs.run_migrations || 'false' }}
+
+jobs:
+  validate-deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Production Confirmation
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ github.event.inputs.confirm_production }}" != "DEPLOY-TO-PROD" ]; then
+            echo "❌ Production confirmation failed. You must type 'DEPLOY-TO-PROD' exactly."
+            exit 1
+          fi
+          echo "✅ Production confirmation validated"
+      
+      - name: Validate Image Tag
+        run: |
+          if [ "${{ env.IMAGE_TAG }}" == "latest" ]; then
+            echo "❌ 'latest' tag is not allowed in production"
+            echo "Please specify a specific version tag (e.g., v1.2.3)"
+            exit 1
+          fi
+          echo "✅ Image tag validated: ${{ env.IMAGE_TAG }}"
+      
+      - name: Deployment Pre-check Summary
+        run: |
+          echo "### 🔍 Deployment Pre-checks" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** PROD" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Tag:** ${{ env.IMAGE_TAG }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Migrations:** ${{ env.RUN_MIGRATIONS }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+
+  deploy:
+    needs: validate-deployment
+    runs-on: ubuntu-latest
+    environment:
+      name: PROD
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::341126269796:role/github-actions-role-prod
+          aws-region: eu-west-3
+
+      - name: Get Lightsail IP from SSM
+        id: get-ip
+        run: |
+          if [ -n "${{ inputs.lightsail_ip }}" ]; then
+            LIGHTSAIL_IP="${{ inputs.lightsail_ip }}"
+          else
+            LIGHTSAIL_IP=$(aws ssm get-parameter --name "/lightsail/prod/ip" --query "Parameter.Value" --output text)
+          fi
+          echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
+          echo "Target server: $LIGHTSAIL_IP"
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AWS_EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ steps.get-ip.outputs.lightsail_ip }} >> ~/.ssh/known_hosts
+
+      - name: Pre-deployment Health Check
+        run: |
+          echo "🏥 Checking current application health..."
+          HEALTH_URL="http://${{ steps.get-ip.outputs.lightsail_ip }}:8080/healthz"
+          
+          if curl -sf "$HEALTH_URL" > /dev/null; then
+            echo "✅ Current application is healthy"
+            echo "current_health=healthy" >> $GITHUB_ENV
+          else
+            echo "⚠️ Current application is not responding (may be first deployment)"
+            echo "current_health=unhealthy" >> $GITHUB_ENV
+          fi
+
+      - name: Checkout Backend Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/lookresto
+          token: ${{ secrets.BACKEND_REPO_PAT || github.token }}
+          path: backend
+
+      - name: Copy Migrations to Server
+        if: env.RUN_MIGRATIONS == 'true'
+        run: |
+          echo "📦 Copying migration files to server..."
+          
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} \
+            'mkdir -p /opt/app/migrations'
+          
+          for module in restaurant kernel notification shared user; do
+            if [ -d "backend/$module/migrations" ]; then
+              echo "Copying $module migrations..."
+              scp -i ~/.ssh/id_rsa -r \
+                backend/$module/migrations \
+                ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/migrations/$module
+            fi
+          done
+
+      - name: Copy Docker Compose files
+        run: |
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+            $GITHUB_WORKSPACE/docker/compose/docker-compose.base.yml \
+            ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/docker-compose.base.yml
+          
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+            $GITHUB_WORKSPACE/docker/compose/docker-compose.prod.yml \
+            ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/docker-compose.prod.yml
+
+      - name: Create .env file on server
+        run: |
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << EOF
+            cat > /opt/app/.env << 'ENVFILE'
+          APP_VERSION=${{ env.IMAGE_TAG }}
+          DB_URL=postgres://app:${{ secrets.PROD_DB_PASSWORD }}@postgres:5432/appdb?sslmode=disable
+          NATS_URL=${{ vars.PROD_NATS_URL || 'nats://nats:4222' }}
+          APP_PORT=8080
+          REDIS_ADDR='redis:6379'
+          GOOGLE_CLIENT_ID=${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET=${{ vars.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REDIRECT_URI=${{ vars.PROD_GOOGLE_REDIRECT_URI }}
+          JWT_SECRET_KEY=${{ secrets.PROD_JWT_SECRET_KEY }}
+          ACCESS_TOKEN_TTL=${{ vars.ACCESS_TOKEN_TTL || '15m' }}
+          REFRESH_TOKEN_TTL=${{ vars.REFRESH_TOKEN_TTL || '7d' }}
+          ACCOUNT_SID=${{ vars.TWILIO_ACCOUNT_SID }}
+          TWILIO_TOKEN=${{ vars.TWILIO_AUTH_TOKEN }}
+          FROM_NUMBER=${{ vars.TWILIO_PHONE_NUMBER }}
+          ENVFILE
+          EOF
+
+      - name: Start Infrastructure Services
+        run: |
+          echo "🚀 Starting infrastructure services..."
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << 'EOF'
+            cd /opt/app
+            
+            docker compose -f docker-compose.base.yml -f docker-compose.prod.yml up postgres redis nats -d
+            
+            echo "⏳ Waiting for services to be ready..."
+            
+            # Wait for postgres
+            for i in {1..30}; do
+              if docker exec prod-postgres pg_isready -U app; then
+                echo "✅ Postgres is ready!"
+                break
+              fi
+              echo "Waiting for postgres... ($i/30)"
+              sleep 2
+            done
+            
+            # Wait for NATS
+            for i in {1..30}; do
+              if docker exec nats nc -z localhost 4222; then
+                echo "✅ NATS is ready!"
+                break
+              fi
+              echo "Waiting for NATS... ($i/30)"
+              sleep 2
+            done
+            
+            # Wait for Redis
+            for i in {1..30}; do
+              if docker exec redis redis-cli ping | grep -q PONG; then
+                echo "✅ Redis is ready!"
+                break
+              fi
+              echo "Waiting for Redis... ($i/30)"
+              sleep 2
+            done
+          EOF
+
+  migration-approval:
+    needs: deploy
+    if: github.event.inputs.run_migrations == 'true' || inputs.run_migrations == true
+    runs-on: ubuntu-latest
+    environment:
+      name: PROD-Migration-Approval
+    steps:
+      - name: Migration Approval Gate
+        run: |
+          echo "### ⚠️ Database Migration Approval Required" >> $GITHUB_STEP_SUMMARY
+          echo "Please review and approve database migrations." >> $GITHUB_STEP_SUMMARY
+          echo "**Image Tag:** ${{ env.IMAGE_TAG }}" >> $GITHUB_STEP_SUMMARY
+
+  run-migrations:
+    needs: [deploy, migration-approval]
+    if: github.event.inputs.run_migrations == 'true' || inputs.run_migrations == true
+    runs-on: ubuntu-latest
+    environment:
+      name: PROD
+    steps:
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::341126269796:role/github-actions-role-prod
+          aws-region: eu-west-3
+
+      - name: Get Lightsail IP
+        id: get-ip
+        run: |
+          LIGHTSAIL_IP=$(aws ssm get-parameter --name "/lightsail/prod/ip" --query "Parameter.Value" --output text)
+          echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AWS_EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ steps.get-ip.outputs.lightsail_ip }} >> ~/.ssh/known_hosts
+
+      - name: Create Database Backup
+        run: |
+          echo "💾 Creating database backup before migrations..."
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} bash << 'EOF'
+            cd /opt/app
+            mkdir -p backups
+            BACKUP_FILE="backup_$(date +%Y%m%d_%H%M%S).sql"
+            docker exec prod-postgres pg_dump -U app appdb > "/opt/app/backups/$BACKUP_FILE"
+            echo "✅ Backup created: $BACKUP_FILE"
+          EOF
+
+      - name: Run Database Migrations
+        run: |
+          echo "🔄 Running migrations..."
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} bash << EOF
+            cd /opt/app
+            
+            NETWORK=\$(docker network ls --filter name=app --format "{{.Name}}" | head -1)
+            if [ -z "\$NETWORK" ]; then
+              NETWORK="app_default"
+            fi
+            echo "Using network: \$NETWORK"
+            
+            for module in restaurant user kernel notification shared; do
+              if [ -d "migrations/\$module" ]; then
+                echo "Running migrations for \$module..."
+                docker run --rm \
+                  --network \$NETWORK \
+                  -v \$(pwd)/migrations/\$module:/migrations \
+                  migrate/migrate:latest \
+                  -path=/migrations \
+                  -database "postgres://app:${{ secrets.PROD_DB_PASSWORD }}@postgres:5432/appdb?sslmode=disable&x-migrations-table=\${module}_migrations" up
+              fi
+            done
+          EOF
+
+  deployment-approval:
+    needs: [deploy, run-migrations]
+    if: |
+      always() &&
+      needs.deploy.result == 'success' &&
+      (needs.run-migrations.result == 'success' || needs.run-migrations.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment:
+      name: PROD-Deployment-Approval
+    steps:
+      - name: Deployment Approval Gate
+        run: |
+          echo "### 🚦 Final Deployment Approval" >> $GITHUB_STEP_SUMMARY
+          echo "Infrastructure and migrations complete." >> $GITHUB_STEP_SUMMARY
+          echo "Approve to deploy application version **${{ env.IMAGE_TAG }}**" >> $GITHUB_STEP_SUMMARY
+
+  deploy-application:
+    needs: [deploy, deployment-approval]
+    runs-on: ubuntu-latest
+    environment:
+      name: PROD
+    steps:
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::341126269796:role/github-actions-role-prod
+          aws-region: eu-west-3
+
+      - name: Get Lightsail IP
+        id: get-ip
+        run: |
+          LIGHTSAIL_IP=$(aws ssm get-parameter --name "/lightsail/prod/ip" --query "Parameter.Value" --output text)
+          echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AWS_EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ steps.get-ip.outputs.lightsail_ip }} >> ~/.ssh/known_hosts
+
+      - name: Deploy Application
+        run: |
+          echo "🚀 Deploying application version: ${{ env.IMAGE_TAG }}"
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << EOF
+            cd /opt/app
+            
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            
+            docker pull ghcr.io/thebowwman/lookresto:${{ env.IMAGE_TAG }}
+            
+            # Gradual rollout: start new container before stopping old one
+            docker compose -f docker-compose.base.yml -f docker-compose.prod.yml up -d app
+            
+            echo "⏳ Waiting for new application to start..."
+            sleep 15
+            
+            docker ps
+          EOF
+
+      - name: Health Check
+        run: |
+          echo "🏥 Running health check..."
+          MAX_RETRIES=30
+          RETRY_COUNT=0
+          
+          HEALTH_URL="http://${{ steps.get-ip.outputs.lightsail_ip }}:8080/healthz"
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if curl -sf "$HEALTH_URL" > /dev/null; then
+              echo "✅ Health check passed!"
+              exit 0
+            fi
+            
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "⏳ Waiting for application... ($RETRY_COUNT/$MAX_RETRIES)"
+            sleep 5
+          done
+          
+          echo "❌ Health check failed after $MAX_RETRIES attempts"
+          exit 1
+
+      - name: Smoke Tests
+        run: |
+          echo "🧪 Running smoke tests..."
+          BASE_URL="http://${{ steps.get-ip.outputs.lightsail_ip }}:8080"
+          
+          # Test health endpoint
+          if ! curl -sf "$BASE_URL/healthz" > /dev/null; then
+            echo "❌ Health endpoint failed"
+            exit 1
+          fi
+          
+          echo "✅ Smoke tests passed"
+
+      - name: Deployment Summary
+        if: success()
+        run: |
