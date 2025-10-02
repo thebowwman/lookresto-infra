@@ -36,6 +36,7 @@ on:
         required: true
       SLACK_WEBHOOK_URL:
         required: false
+     
 
 permissions:
   id-token: write
