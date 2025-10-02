@@ -22,6 +22,7 @@ permissions:
   id-token: write
   contents: read
 
+
 jobs:
   validate-input:
     runs-on: ubuntu-latest
@@ -161,4 +162,8 @@ jobs:
     with:
       lightsail_ip: ${{ needs.terraform.outputs.lightsail_ip }}
       deploy_application: false  # Don't auto-deploy in prod
-    secrets: inherit
+    secrets:
+      AWS_EC2_SSH_PRIVATE_KEY: ${{ secrets.AWS_EC2_SSH_PRIVATE_KEY }}
+      SLACK_WEBHOOK_URL: ${{ vars.SLACK_WEBHOOK_URL }}
+      BACKEND_REPO_PAT: ${{ secrets.BACKEND_REPO_PAT }}
+      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
