@@ -9,6 +9,11 @@ on:
         description: 'IP address of the Lightsail instance'
         required: false
         type: string
+      deploy_application:
+        description: 'Automatically deploy application after provisioning'
+        required: false
+        type: boolean
+        default: true
     secrets:
       AWS_EC2_SSH_PRIVATE_KEY:
         required: true
@@ -24,6 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: UAT
+    outputs:
+      lightsail_ip: ${{ steps.get-ip.outputs.lightsail_ip }}
     
     steps:
       - name: Checkout repository
@@ -131,3 +138,12 @@ jobs:
             Actor: ${{ github.actor }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  
+  deploy-application:
+    needs: provision
+    if: success() && inputs.deploy_application != false
+    uses: ./.github/workflows/deploy-application-uat.yml
+    secrets: inherit
+    with:
+      image_tag: 'latest'
+      run_migrations: true
