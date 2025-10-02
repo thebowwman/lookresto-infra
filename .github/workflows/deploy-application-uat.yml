@@ -75,7 +75,7 @@ jobs:
           if [ -n "${{ inputs.lightsail_ip }}" ]; then
             LIGHTSAIL_IP="${{ inputs.lightsail_ip }}"
           else
-            LIGHTSAIL_IP=$(aws ssm get-parameter --name "/default/lightsail/public_ip" --query "Parameter.Value" --output text)
+            LIGHTSAIL_IP=$(aws ssm get-parameter --name "/lightsail/uat/ip" --query "Parameter.Value" --output text)
           fi
           echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
           echo "Target server: $LIGHTSAIL_IP"
