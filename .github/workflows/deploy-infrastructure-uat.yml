@@ -42,14 +42,14 @@ jobs:
           terraform_version: 1.6.0
       
       - name: Terraform Init
-        run: terraform -chdir=terraform/lightsail init -reconfigure
+        run: terraform -chdir=terraform/lightsail-uat init -reconfigure
         env:
           TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
           TF_VAR_environment: uat
 
 
       - name: Terraform Validate
-        run: terraform -chdir=terraform/lightsail validate
+        run: terraform -chdir=terraform/lightsail-uat validate
       
       - name: Terraform Plan
         if: github.event.inputs.terraform_action == 'plan'
@@ -65,12 +65,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan-output
-          path: terraform/lightsail/plan_output.txt
+          path: terraform/lightsail/uat/plan_output.txt
           retention-days: 5
       
       - name: Terraform Apply
         if: github.event.inputs.terraform_action == 'apply'
-        run: terraform -chdir=terraform/lightsail apply -auto-approve
+        run: terraform -chdir=terraform/lightsail-uat apply -auto-approve
         env:
           TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
           TF_VAR_environment: uat
@@ -78,7 +78,7 @@ jobs:
       
       - name: Terraform Destroy
         if: github.event.inputs.terraform_action == 'destroy'
-        run: terraform -chdir=terraform/lightsail destroy -auto-approve
+        run: terraform -chdir=terraform/lightsail-uat destroy -auto-approve
         env:
           TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
           TF_VAR_environment: uat
