@@ -154,11 +154,11 @@ jobs:
           echo "Server provisioning requires manual approval." >> $GITHUB_STEP_SUMMARY
           echo "**Server IP:** ${{ needs.terraform.outputs.lightsail_ip }}" >> $GITHUB_STEP_SUMMARY
 
-  #provision:
-  #  needs: [terraform, await-approval]
-  #  if: github.event.inputs.terraform_action == 'apply'
-  #  uses: ./.github/workflows/provision-server-prod.yml
-  #  with:
-  #    lightsail_ip: ${{ needs.terraform.outputs.lightsail_ip }}
-  #    deploy_application: false  # Don't auto-deploy in prod
+  provision:
+    needs: [terraform, await-approval]
+    if: github.event.inputs.terraform_action == 'apply'
+    uses: ./.github/workflows/provision-server-prod.yml
+    with:
+      lightsail_ip: ${{ needs.terraform.outputs.lightsail_ip }}
+      deploy_application: false  # Don't auto-deploy in prod
   #  secrets: inherit
