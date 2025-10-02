@@ -210,7 +210,7 @@ jobs:
           MAX_RETRIES=30
           RETRY_COUNT=0
           
-          HEALTH_URL="http://${{ steps.get-ip.outputs.lightsail_ip }}:8080/health"
+          HEALTH_URL="http://${{ steps.get-ip.outputs.lightsail_ip }}:8080/healthz"
           
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
             if curl -sf "$HEALTH_URL" > /dev/null; then
