@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: UAT
+    outputs:
+      lightsail_ip: ${{ steps.outputs.outputs.lightsail_ip }}
     
     steps:
       - name: Checkout repository
@@ -86,7 +88,9 @@ jobs:
           echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
           echo "### Infrastructure Outputs" >> $GITHUB_STEP_SUMMARY
           echo "**Lightsail IP:** $LIGHTSAIL_IP" >> $GITHUB_STEP_SUMMARY
-      
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⏭️ **Next:** Provisioning workflow will start automatically" >> $GITHUB_STEP_SUMMARY
+
       - name: Send Slack notification
         run: |
           curl -X POST -H 'Content-type: application/json' \
@@ -94,3 +98,10 @@ jobs:
             $SLACK_WEBHOOK_URL
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  provision:
+    needs: terraform
+    if: github.event.inputs.terraform_action == 'apply'
+    uses: ./.github/workflows/provision-server-uat.yml
+    secrets: inherit
+    with:
+      lightsail_ip: ${{ needs.terraform.outputs.lightsail_ip }}
