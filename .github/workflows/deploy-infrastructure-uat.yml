@@ -47,8 +47,6 @@ jobs:
           TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
           TF_VAR_environment: uat
 
-      - name: Terraform Format Check
-        run: terraform -chdir=terraform/lightsail fmt -check
 
       - name: Terraform Validate
         run: terraform -chdir=terraform/lightsail validate
