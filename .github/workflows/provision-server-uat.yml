@@ -16,9 +16,14 @@ on:
         default: true
     secrets:
       AWS_EC2_SSH_PRIVATE_KEY:
-        required: true
+        required: true  # Keep this as required
       SLACK_WEBHOOK_URL:
         required: false
+      BACKEND_REPO_PAT:  # Add this for the deploy-application workflow
+        required: false
+      GHCR_TOKEN:  # Add this for the deploy-application workflow
+        required: false
+    
 
 permissions:
   id-token: write
