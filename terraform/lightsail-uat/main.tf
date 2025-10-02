@@ -12,12 +12,12 @@ terraform {
   }
 
   # Separate backend for UAT
-  backend "s3" {
-    bucket         = "your-terraform-state-bucket"
-    key            = "lightsail/uat/terraform.tfstate"
+backend "s3" {
+    bucket         = "my-terraform-uat-state"
+    key            = "uat/terraform.tfstate"
     region         = "eu-west-3"
+    dynamodb_table = "terraform-uat-locks"
     encrypt        = true
-    dynamodb_table = "terraform-state-lock"
   }
 }
 
