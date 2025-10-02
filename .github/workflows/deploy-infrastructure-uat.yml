@@ -51,7 +51,7 @@ jobs:
         id: plan
         run: |
           terraform -chdir=terraform/lightsail plan -out=tfplan
-          terraform -chdir=terraform/lightsail show -no-color tfplan > plan_output.txt
+          terraform -chdir=terraform/lightsail show -no-color tfplan > terraform/lightsail/plan_output.txt
         env:
           TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
           TF_VAR_environment: uat
