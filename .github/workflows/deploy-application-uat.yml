@@ -17,6 +17,10 @@ on:
         default: true
   workflow_call:  # Add this
     inputs:
+      lightsail_ip:
+        description: "Lightsail IP of the target server"
+        required: false
+        type: string
       image_tag:
         description: "Docker image tag to deploy"
         required: false
