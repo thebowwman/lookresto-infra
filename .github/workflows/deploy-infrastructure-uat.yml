@@ -54,8 +54,8 @@ jobs:
       - name: Terraform Plan
         if: github.event.inputs.terraform_action == 'plan'
         run: |
-          terraform -chdir=terraform/lightsail plan -out=tfplan
-          terraform -chdir=terraform/lightsail show -no-color tfplan > terraform/lightsail/plan_output.txt
+          terraform -chdir=terraform/lightsail-uat plan -out=tfplan
+          terraform -chdir=terraform/lightsail-uat show -no-color tfplan > terraform/lightsail/uat/plan_output.txt
         env:
           TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
           TF_VAR_environment: uat
@@ -87,7 +87,7 @@ jobs:
         if: github.event.inputs.terraform_action == 'apply'
         id: outputs
         run: |
-          LIGHTSAIL_IP=$(terraform -chdir=terraform/lightsail output -raw lightsail_ip)
+          LIGHTSAIL_IP=$(terraform -chdir=terraform/lightsail-uat output -raw lightsail_ip)
           echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
           echo "### Infrastructure Outputs" >> $GITHUB_STEP_SUMMARY
           echo "**Lightsail IP:** $LIGHTSAIL_IP" >> $GITHUB_STEP_SUMMARY
