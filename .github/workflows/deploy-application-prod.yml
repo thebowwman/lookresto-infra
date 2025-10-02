@@ -166,7 +166,7 @@ jobs:
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << EOF
             cat > /opt/app/.env << 'ENVFILE'
           APP_VERSION=${{ env.IMAGE_TAG }}
-          DB_URL=postgres://app:${{ secrets.PROD_DB_PASSWORD }}@postgres:5432/appdb?sslmode=disable
+          DB_URL=postgres://app:secret@postgres:5432/appdb?sslmode=disable
           NATS_URL=${{ vars.PROD_NATS_URL || 'nats://nats:4222' }}
           APP_PORT=8080
           REDIS_ADDR='redis:6379'
