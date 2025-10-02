@@ -87,6 +87,15 @@
         group: ubuntu
         mode: '0755'
 
+
+    - name: Create logs directory
+      file:
+        path: "{{ app_dir }}/logs"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0777'  # Allow containers to write logs
+
     - name: Install Python Docker SDK
       pip:
         name:
