@@ -1,0 +1,164 @@
+# .github/workflows/deploy-infrastructure-prod.yml
+name: Deploy Infrastructure - PROD
+
+on:
+  workflow_dispatch:
+    inputs:
+      terraform_action:
+        description: "Terraform action to perform"
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+        default: "plan"
+      confirm_production:
+        description: "Type 'CONFIRM-PROD' to proceed with production changes"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validate-input:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Production Confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm_production }}" != "CONFIRM-PROD" ]; then
+            echo "❌ Production confirmation failed. You must type 'CONFIRM-PROD' exactly."
+            exit 1
+          fi
+          echo "✅ Production confirmation validated"
+
+  terraform:
+    needs: validate-input
+    runs-on: ubuntu-latest
+    environment:
+      name: PROD
+    outputs:
+      lightsail_ip: ${{ steps.outputs.outputs.lightsail_ip }}
+      plan_summary: ${{ steps.plan-summary.outputs.summary }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::341126269796:role/github-actions-role-prod
+          aws-region: eu-west-3
+      
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+      
+      - name: Terraform Init
+        run: terraform -chdir=terraform/lightsail init -reconfigure
+        env:
+          TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
+          TF_VAR_environment: prod
+
+      - name: Terraform Validate
+        run: terraform -chdir=terraform/lightsail validate
+      
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform -chdir=terraform/lightsail plan -out=tfplan
+          terraform -chdir=terraform/lightsail show -no-color tfplan > terraform/lightsail/plan_output.txt
+        env:
+          TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
+          TF_VAR_environment: prod
+      
+      - name: Generate Plan Summary
+        id: plan-summary
+        run: |
+          echo "### 📋 Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          head -50 terraform/lightsail/plan_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          
+          # Extract resource changes
+          CHANGES=$(grep -E "Plan:|No changes" terraform/lightsail/plan_output.txt || echo "Unable to parse changes")
+          echo "summary=$CHANGES" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Changes:** $CHANGES" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Upload Plan Output
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-output-prod
+          path: terraform/lightsail/plan_output.txt
+          retention-days: 30
+      
+      - name: Terraform Apply
+        if: github.event.inputs.terraform_action == 'apply'
+        run: terraform -chdir=terraform/lightsail apply -auto-approve
+        env:
+          TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
+          TF_VAR_environment: prod
+        timeout-minutes: 20
+      
+      - name: Terraform Destroy
+        if: github.event.inputs.terraform_action == 'destroy'
+        run: terraform -chdir=terraform/lightsail destroy -auto-approve
+        env:
+          TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
+          TF_VAR_environment: prod
+      
+      - name: Get Infrastructure Outputs
+        if: github.event.inputs.terraform_action == 'apply'
+        id: outputs
+        run: |
+          LIGHTSAIL_IP=$(terraform -chdir=terraform/lightsail output -raw lightsail_ip)
+          echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
+          echo "### Infrastructure Outputs" >> $GITHUB_STEP_SUMMARY
+          echo "**Lightsail IP:** $LIGHTSAIL_IP" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⏭️ **Next:** Manual approval required for provisioning" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Send Slack notification (success)
+        if: success() && github.event.inputs.terraform_action == 'apply'
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"✅ PROD Infrastructure deployment succeeded\n*Commit:* $GITHUB_SHA\n*Triggered by:* ${{ github.actor }}\"}" \
+            $SLACK_WEBHOOK_URL
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Send Slack notification (failure)
+        if: failure()
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"❌ PROD Infrastructure deployment FAILED\n*Commit:* $GITHUB_SHA\n*Triggered by:* ${{ github.actor }}\n*Action:* ${{ github.event.inputs.terraform_action }}\"}" \
+            $SLACK_WEBHOOK_URL
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  
+  await-approval:
+    needs: terraform
+    if: github.event.inputs.terraform_action == 'apply'
+    runs-on: ubuntu-latest
+    environment:
+      name: PROD-Provision-Approval
+    steps:
+      - name: Approval Gate
+        run: |
+          echo "### ⏸️ Awaiting Manual Approval" >> $GITHUB_STEP_SUMMARY
+          echo "Server provisioning requires manual approval." >> $GITHUB_STEP_SUMMARY
+          echo "**Server IP:** ${{ needs.terraform.outputs.lightsail_ip }}" >> $GITHUB_STEP_SUMMARY
+
+  provision:
+    needs: [terraform, await-approval]
+    if: github.event.inputs.terraform_action == 'apply'
+    uses: ./.github/workflows/provision-server-prod.yml
+    with:
+      lightsail_ip: ${{ needs.terraform.outputs.lightsail_ip }}
+      deploy_application: false  # Don't auto-deploy in prod
+    secrets: inherit
