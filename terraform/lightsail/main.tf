@@ -67,7 +67,7 @@ variable "bundle_id" {
 variable "open_tcp_ports" {
   description = "List of TCP ports to open in Lightsail firewall."
   type        = list(number)
-  default     = [22, 80, 443]
+  default     = [22, 80, 443, 8080]
 }
 
 ############################################
@@ -153,11 +153,17 @@ resource "aws_route53_record" "uat_dns" {
 ############################################
 # SSM Parameter Store (save public IP)
 ############################################
-resource "aws_ssm_parameter" "uat_ip" {
-  name  = "/${terraform.workspace}/lightsail/public_ip"
+resource "aws_ssm_parameter" "lightsail_ip" {
+  name  = "/lightsail/uat/ip"
   type  = "String"
-  value = aws_lightsail_static_ip.uat_ip.ip_address
+  value = aws_lightsail_static_ip.uat_ip.ip_address  # Use static IP
+  
+  tags = {
+    Environment = "uat"
+    ManagedBy   = "terraform"
+  }
 }
+
 
 ############################################
 # Outputs
