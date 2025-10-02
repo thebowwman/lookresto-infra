@@ -1,5 +1,6 @@
 # .github/workflows/deploy-infrastructure-uat.yml
 name: Deploy Infrastructure - UAT
+
 on:
   workflow_dispatch:
     inputs:
@@ -12,9 +13,11 @@ on:
           - apply
           - destroy
         default: "plan"
+
 permissions:
   id-token: write
   contents: read
+
 jobs:
   terraform:
     runs-on: ubuntu-latest
@@ -43,12 +46,15 @@ jobs:
         env:
           TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
           TF_VAR_environment: uat
-      
+
+      - name: Terraform Format Check
+        run: terraform -chdir=terraform/lightsail fmt -check
+
       - name: Terraform Validate
         run: terraform -chdir=terraform/lightsail validate
       
       - name: Terraform Plan
-        id: plan
+        if: github.event.inputs.terraform_action == 'plan'
         run: |
           terraform -chdir=terraform/lightsail plan -out=tfplan
           terraform -chdir=terraform/lightsail show -no-color tfplan > terraform/lightsail/plan_output.txt
@@ -57,6 +63,7 @@ jobs:
           TF_VAR_environment: uat
       
       - name: Upload Plan Output
+        if: github.event.inputs.terraform_action == 'plan'
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan-output
@@ -65,10 +72,11 @@ jobs:
       
       - name: Terraform Apply
         if: github.event.inputs.terraform_action == 'apply'
-        run: terraform -chdir=terraform/lightsail apply -auto-approve tfplan
+        run: terraform -chdir=terraform/lightsail apply -auto-approve
         env:
           TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
           TF_VAR_environment: uat
+        timeout-minutes: 15
       
       - name: Terraform Destroy
         if: github.event.inputs.terraform_action == 'destroy'
@@ -88,11 +96,20 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "⏭️ **Next:** Provisioning workflow will start automatically" >> $GITHUB_STEP_SUMMARY
       
-      - name: Send Slack notification
+      - name: Send Slack notification (success)
         if: success() && github.event.inputs.terraform_action == 'apply'
         run: |
           curl -X POST -H 'Content-type: application/json' \
             --data "{\"text\":\"✅ Deployment to UAT succeeded on commit $GITHUB_SHA\"}" \
+            $SLACK_WEBHOOK_URL
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Send Slack notification (failure)
+        if: failure() && github.event.inputs.terraform_action == 'apply'
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"❌ Deployment to UAT failed on commit $GITHUB_SHA\"}" \
             $SLACK_WEBHOOK_URL
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -105,3 +122,4 @@ jobs:
       lightsail_ip: ${{ needs.terraform.outputs.lightsail_ip }}
       deploy_application: true
     secrets: inherit
+
