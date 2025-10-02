@@ -194,7 +194,7 @@ jobs:
             
             # Wait for postgres
             for i in {1..30}; do
-              if docker exec prod-postgres pg_isready -U app; then
+              if docker exec uat-postgres pg_isready -U app; then
                 echo "✅ Postgres is ready!"
                 break
               fi
@@ -269,7 +269,7 @@ jobs:
             cd /opt/app
             mkdir -p backups
             BACKUP_FILE="backup_$(date +%Y%m%d_%H%M%S).sql"
-            docker exec prod-postgres pg_dump -U app appdb > "/opt/app/backups/$BACKUP_FILE"
+            docker exec uat-postgres pg_dump -U app appdb > "/opt/app/backups/$BACKUP_FILE"
             echo "✅ Backup created: $BACKUP_FILE"
           EOF
 
