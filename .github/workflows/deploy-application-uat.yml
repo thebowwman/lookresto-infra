@@ -15,6 +15,27 @@ on:
         required: true
         type: boolean
         default: true
+  workflow_call:  # Add this
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy"
+        required: false
+        type: string
+        default: "latest"
+      run_migrations:
+        description: "Run database migrations"
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      AWS_EC2_SSH_PRIVATE_KEY:
+        required: true
+      BACKEND_REPO_PAT:
+        required: false
+      GHCR_TOKEN:
+        required: true
+      SLACK_WEBHOOK_URL:
+        required: false
 
 permissions:
   id-token: write
