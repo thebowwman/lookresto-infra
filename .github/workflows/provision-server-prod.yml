@@ -1,0 +1,164 @@
+# .github/workflows/provision-server-prod.yml
+name: Provision Server - PROD
+
+on:
+  workflow_dispatch:
+    inputs:
+      lightsail_ip:
+        description: 'IP address of the Lightsail instance (leave empty to fetch from SSM)'
+        required: false
+        type: string
+      deploy_application:
+        description: 'Automatically deploy application after provisioning'
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      lightsail_ip:
+        description: 'IP address of the Lightsail instance'
+        required: false
+        type: string
+      deploy_application:
+        description: 'Automatically deploy application after provisioning'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      AWS_EC2_SSH_PRIVATE_KEY:
+        required: true
+      SLACK_WEBHOOK_URL:
+        required: false
+      BACKEND_REPO_PAT:
+        required: false
+      GHCR_TOKEN:
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    environment:
+      name: PROD
+    outputs:
+      lightsail_ip: ${{ steps.get-ip.outputs.lightsail_ip }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::341126269796:role/github-actions-role
+          aws-region: eu-west-3
+
+      - name: Get Lightsail IP from SSM
+        id: get-ip
+        run: |
+          if [ -n "${{ inputs.lightsail_ip }}" ]; then
+            LIGHTSAIL_IP="${{ inputs.lightsail_ip }}"
+          else
+            LIGHTSAIL_IP=$(aws ssm get-parameter --name "/lightsail/prod/ip" --query "Parameter.Value" --output text)
+          fi
+          echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
+          echo "Target server: $LIGHTSAIL_IP"
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AWS_EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ steps.get-ip.outputs.lightsail_ip }} >> ~/.ssh/known_hosts
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Ansible
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible
+
+      - name: Install Ansible Docker collection
+        run: ansible-galaxy collection install community.docker
+
+      - name: Create dynamic inventory
+        run: |
+          cat > ansible/inventory/dynamic_prod <<EOF
+          [prod]
+          prod-server ansible_host=${{ steps.get-ip.outputs.lightsail_ip }}
+          
+          [prod:vars]
+          ansible_user=ubuntu
+          ansible_ssh_private_key_file=~/.ssh/id_rsa
+          ansible_python_interpreter=/usr/bin/python3
+          github_username=${{ github.actor }}
+          github_token=${{ secrets.GITHUB_TOKEN }}
+          EOF
+
+      - name: Test SSH connection
+        run: |
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} 'echo "SSH connection successful"'
+
+      - name: Run Ansible provisioning playbook
+        run: |
+          cd ansible
+          ansible-playbook -i inventory/dynamic_prod provision-server.yml -v
+
+      - name: Copy Docker Compose files
+        run: |
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+            $GITHUB_WORKSPACE/docker/compose/docker-compose.prod.yml \
+            ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/docker-compose.prod.yml
+          
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+            $GITHUB_WORKSPACE/docker/compose/docker-compose.base.yml \
+            ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/docker-compose.base.yml || true
+
+      - name: Verify Docker installation
+        run: |
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << 'EOF'
+            docker --version
+            docker-compose --version
+            docker ps
+            ls -la /opt/app
+          EOF
+
+      - name: Provisioning Summary
+        run: |
+          echo "### ✅ PROD Server Provisioning Complete" >> $GITHUB_STEP_SUMMARY
+          echo "**Server IP:** ${{ steps.get-ip.outputs.lightsail_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Docker:** Installed and running" >> $GITHUB_STEP_SUMMARY
+          echo "**App Directory:** /opt/app" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ **Next step:** Manual deployment trigger required" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Slack
+        if: always()
+        run: |
+          STATUS_EMOJI="${{ job.status == 'success' && '✅' || '❌' }}"
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"$STATUS_EMOJI PROD Server Provisioning: ${{ job.status }}\n*IP:* ${{ steps.get-ip.outputs.lightsail_ip }}\n*Actor:* ${{ github.actor }}\"}" \
+            $SLACK_WEBHOOK_URL
+        env:
+          SLACK_WEBHOOK_URL: ${{ vars.SLACK_WEBHOOK_URL }}
+
+  notify-deployment-ready:
+    needs: provision
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify deployment ready
+        run: |
+          echo "### 🚀 Ready for Application Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "Server provisioning complete. To deploy the application:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Go to Actions tab" >> $GITHUB_STEP_SUMMARY
+          echo "2. Select 'Deploy Application - PROD'" >> $GITHUB_STEP_SUMMARY
+          echo "3. Run workflow with desired image tag" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Server IP:** ${{ needs.provision.outputs.lightsail_ip }}" >> $GITHUB_STEP_SUMMARY
