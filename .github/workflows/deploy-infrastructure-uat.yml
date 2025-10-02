@@ -105,3 +105,5 @@ jobs:
     with:
       lightsail_ip: ${{ needs.terraform.outputs.lightsail_ip }}
       deploy_application: true
+      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
