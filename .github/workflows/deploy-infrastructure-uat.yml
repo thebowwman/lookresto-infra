@@ -104,3 +104,4 @@ jobs:
     secrets: inherit
     with:
       lightsail_ip: ${{ needs.terraform.outputs.lightsail_ip }}
+      deploy_application: true
