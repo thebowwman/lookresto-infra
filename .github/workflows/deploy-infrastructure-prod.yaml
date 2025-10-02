@@ -59,19 +59,19 @@ jobs:
           terraform_version: 1.6.0
       
       - name: Terraform Init
-        run: terraform -chdir=terraform/lightsail init -reconfigure
+        run: terraform -chdir=terraform/lightsail-prod init -reconfigure
         env:
           TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
           TF_VAR_environment: prod
 
       - name: Terraform Validate
-        run: terraform -chdir=terraform/lightsail validate
+        run: terraform -chdir=terraform/lightsail-prod validate
       
       - name: Terraform Plan
         id: plan
         run: |
-          terraform -chdir=terraform/lightsail plan -out=tfplan
-          terraform -chdir=terraform/lightsail show -no-color tfplan > terraform/lightsail/plan_output.txt
+          terraform -chdir=terraform/lightsail-prod plan -out=tfplan
+          terraform -chdir=terraform/lightsail-prod show -no-color tfplan > terraform/lightsail-prod/plan_output.txt
         env:
           TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
           TF_VAR_environment: prod
@@ -81,11 +81,11 @@ jobs:
         run: |
           echo "### 📋 Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          head -50 terraform/lightsail/plan_output.txt >> $GITHUB_STEP_SUMMARY
+          head -50 terraform/lightsail-prod/plan_output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           
           # Extract resource changes
-          CHANGES=$(grep -E "Plan:|No changes" terraform/lightsail/plan_output.txt || echo "Unable to parse changes")
+          CHANGES=$(grep -E "Plan:|No changes" terraform/lightsail-prod/plan_output.txt || echo "Unable to parse changes")
           echo "summary=$CHANGES" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Changes:** $CHANGES" >> $GITHUB_STEP_SUMMARY
@@ -94,12 +94,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan-output-prod
-          path: terraform/lightsail/plan_output.txt
+          path: terraform/lightsail-prod/plan_output.txt
           retention-days: 30
       
       - name: Terraform Apply
         if: github.event.inputs.terraform_action == 'apply'
-        run: terraform -chdir=terraform/lightsail apply -auto-approve
+        run: terraform -chdir=terraform/lightsail-prod apply -auto-approve
         env:
           TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
           TF_VAR_environment: prod
@@ -107,7 +107,7 @@ jobs:
       
       - name: Terraform Destroy
         if: github.event.inputs.terraform_action == 'destroy'
-        run: terraform -chdir=terraform/lightsail destroy -auto-approve
+        run: terraform -chdir=terraform/lightsail-prod destroy -auto-approve
         env:
           TF_VAR_ec2_public_key: ${{ secrets.AWS_EC2_SSH_PUBLIC_KEY }}
           TF_VAR_environment: prod
@@ -116,7 +116,7 @@ jobs:
         if: github.event.inputs.terraform_action == 'apply'
         id: outputs
         run: |
-          LIGHTSAIL_IP=$(terraform -chdir=terraform/lightsail output -raw lightsail_ip)
+          LIGHTSAIL_IP=$(terraform -chdir=terraform/lightsail-prod output -raw lightsail_ip)
           echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
           echo "### Infrastructure Outputs" >> $GITHUB_STEP_SUMMARY
           echo "**Lightsail IP:** $LIGHTSAIL_IP" >> $GITHUB_STEP_SUMMARY
@@ -130,7 +130,7 @@ jobs:
             --data "{\"text\":\"✅ PROD Infrastructure deployment succeeded\n*Commit:* $GITHUB_SHA\n*Triggered by:* ${{ github.actor }}\"}" \
             $SLACK_WEBHOOK_URL
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ vars.SLACK_WEBHOOK_URL }}
 
       - name: Send Slack notification (failure)
         if: failure()
@@ -139,7 +139,7 @@ jobs:
             --data "{\"text\":\"❌ PROD Infrastructure deployment FAILED\n*Commit:* $GITHUB_SHA\n*Triggered by:* ${{ github.actor }}\n*Action:* ${{ github.event.inputs.terraform_action }}\"}" \
             $SLACK_WEBHOOK_URL
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ vars.SLACK_WEBHOOK_URL }}
   
   await-approval:
     needs: terraform
