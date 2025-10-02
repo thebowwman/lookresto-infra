@@ -396,3 +396,21 @@ jobs:
       - name: Deployment Summary
         if: success()
         run: |
+
+      - name: Send Slack notification (success)
+        if: success()
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"✅ PROD Deployment successful\n*Version:* ${{ env.IMAGE_TAG }}\n*Actor:* ${{ github.actor }}\n*Server:* ${{ steps.get-ip.outputs.lightsail_ip }}\"}" \
+            $SLACK_WEBHOOK_URL
+        env:
+          SLACK_WEBHOOK_URL: ${{ vars.SLACK_WEBHOOK_URL }}
+
+      - name: Send Slack notification (failure)
+        if: failure()
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"❌ PROD Deployment FAILED\n*Version:* ${{ env.IMAGE_TAG }}\n*Actor:* ${{ github.actor }}\n*Server:* ${{ steps.get-ip.outputs.lightsail_ip }}\"}" \
+            $SLACK_WEBHOOK_URL
+        env:
+          SLACK_WEBHOOK_URL: ${{ vars.SLACK_WEBHOOK_URL }}
