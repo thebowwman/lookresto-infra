@@ -246,7 +246,7 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::341126269796:role/github-actions-role-prod
+          role-to-assume: arn:aws:iam::341126269796:role/github-actions-role
           aws-region: eu-west-3
 
       - name: Get Lightsail IP
@@ -323,7 +323,7 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::341126269796:role/github-actions-role-prod
+          role-to-assume: arn:aws:iam::341126269796:role/github-actions-role
           aws-region: eu-west-3
 
       - name: Get Lightsail IP
