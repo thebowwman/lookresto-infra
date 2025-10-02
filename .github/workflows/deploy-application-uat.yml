@@ -62,12 +62,19 @@ jobs:
           role-to-assume: arn:aws:iam::341126269796:role/github-actions-role
           aws-region: eu-west-3
 
+
       - name: Get Lightsail IP from SSM
         id: get-ip
         run: |
-          LIGHTSAIL_IP=$(aws ssm get-parameter --name "/default/lightsail/public_ip" --query "Parameter.Value" --output text)
+          # Use input if provided (from workflow_call), otherwise get from SSM
+          if [ -n "${{ inputs.lightsail_ip }}" ]; then
+            LIGHTSAIL_IP="${{ inputs.lightsail_ip }}"
+          else
+            LIGHTSAIL_IP=$(aws ssm get-parameter --name "/default/lightsail/public_ip" --query "Parameter.Value" --output text)
+          fi
           echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
-          echo "Deploying to: $LIGHTSAIL_IP"
+          echo "Target server: $LIGHTSAIL_IP"
+      
 
       - name: Set up SSH
         run: |
