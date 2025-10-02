@@ -144,21 +144,9 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
-  verify-provision:
-    needs: provision
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for server stabilization
-        run: |
-          echo "⏳ Waiting 30 seconds for server to stabilize..."
-          sleep 30
-      
-      - name: Verify server ready
-        run: |
-          echo "✅ Server is ready for deployment"
  
   deploy-application:
-    needs: verify-provision
+    needs: provision
     if: success() && inputs.deploy_application != false
     uses: ./.github/workflows/deploy-application-uat.yml
     secrets: inherit
