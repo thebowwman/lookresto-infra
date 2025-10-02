@@ -98,9 +98,7 @@ resource "aws_lightsail_instance" "uat" {
   bundle_id         = var.bundle_id
   key_pair_name     = aws_lightsail_key_pair.uat_key.name
 
-  timeouts {
-    create = "10m"
-  }
+ 
 
   # Optional cloud-init to prep the box (comment out if not needed)
   # user_data = <<-EOF
