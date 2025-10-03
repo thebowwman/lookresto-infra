@@ -42,7 +42,8 @@ services:
       - ../notification/migrations:/migrations/notification
       - ../shared/migrations:/migrations/shared
     networks:
-      - default
+      - lookresto-net
+    
       
   nginx-proxy:
     image: jwilder/nginx-proxy:latest
@@ -56,6 +57,8 @@ services:
       - nginx_vhost:/etc/nginx/vhost.d
       - nginx_html:/usr/share/nginx/html
     restart: unless-stopped
+    networks:
+      - lookresto-net
 
   letsencrypt:
     image: nginxproxy/acme-companion
@@ -70,6 +73,8 @@ services:
       - nginx_vhost:/etc/nginx/vhost.d
       - nginx_html:/usr/share/nginx/html
     restart: unless-stopped
+    networks:
+      - lookresto-net
     
   postgres:
     image: postgis/postgis:16-3.4
@@ -88,6 +93,8 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - lookresto-net
 
 volumes:
   postgres_data:
