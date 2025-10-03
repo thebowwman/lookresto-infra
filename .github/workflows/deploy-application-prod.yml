@@ -401,9 +401,9 @@ jobs:
             docker pull ghcr.io/thebowwman/lookresto:${{ env.IMAGE_TAG }}
             
             # Gradual rollout: start new container before stopping old one
-            docker compose -f docker-compose.base.yml -f docker-compose.prod.yml up -d --remove-orphans app
+            docker compose -f docker-compose.base.yml -f docker-compose.prod.yml up -d app
 
-            docker compose -f docker-compose.base.yml -f docker-compose.prod.yml up -d --remove-orphans nginx-proxy letsencrypt
+            docker compose -f docker-compose.base.yml -f docker-compose.prod.yml up -d nginx-proxy letsencrypt
             
             echo "⏳ Waiting for new application to start..."
             sleep 15
