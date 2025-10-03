@@ -274,21 +274,6 @@ jobs:
             docker compose -f docker-compose.observability.yml up -d
           EOF
 
-      - name: Observability Health Check
-        run: |
-          GRAFANA_URL="http://${{ steps.get-ip.outputs.lightsail_ip }}:3000"
-          LOKI_URL="http://${{ steps.get-ip.outputs.lightsail_ip }}:3100/ready"
-          if curl -sf "$GRAFANA_URL/login" > /dev/null; then
-            echo "✅ Grafana is up at $GRAFANA_URL"
-          else
-            echo "⚠️ Grafana is not responding"
-          fi
-          if curl -sf "$LOKI_URL" > /dev/null; then
-            echo "✅ Loki is up at $LOKI_URL"
-          else
-            echo "⚠️ Loki is not responding"
-          fi
-
   migration-approval:
     needs: deploy-observability
     if: github.event.inputs.run_migrations == 'true' || inputs.run_migrations == true
@@ -447,6 +432,15 @@ jobs:
           
           echo "❌ Health check failed after $MAX_RETRIES attempts"
           exit 1
+
+      - name: Observability Health Check
+        run: |
+          GRAFANA_URL="https://grafana.lookresto.com"
+          if curl -sf "$GRAFANA_URL/login" > /dev/null; then
+            echo "✅ Grafana is up at $GRAFANA_URL"
+          else
+            echo "⚠️ Grafana is not responding"
+          fi
 
       - name: Smoke Tests
         run: |
