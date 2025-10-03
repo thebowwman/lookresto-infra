@@ -47,3 +47,7 @@ services:
 volumes:
   loki_data:
   grafana_data:
+
+networks:
+  lookresto-net:
+    external: true
