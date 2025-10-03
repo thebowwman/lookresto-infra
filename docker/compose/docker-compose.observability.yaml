@@ -6,7 +6,7 @@ services:
       - -config.file=/etc/loki/config/loki-config.yml
       - -config.expand-env=true
     volumes:
-      - ./obs/loki-config.yml:/etc/loki/config/loki-config.yml:ro
+      - ./observability/loki-config.yaml:/etc/loki/config/loki-config.yml:ro
       - loki_data:/loki
     ports:
       - "3100:3100"
