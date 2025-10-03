@@ -359,7 +359,7 @@ jobs:
                   -v \$(pwd)/migrations/\$module:/migrations \
                   migrate/migrate:latest \
                   -path=/migrations \
-                  -database "postgres://app:${{ secrets.PROD_DB_PASSWORD }}@postgres:5432/appdb?sslmode=disable&x-migrations-table=\${module}_migrations" up
+                  -database "postgres://app:secret@postgres:5432/appdb?sslmode=disable&x-migrations-table=\${module}_migrations" up
               fi
             done
           EOF
