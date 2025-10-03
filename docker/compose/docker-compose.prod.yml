@@ -17,8 +17,8 @@ services:
       ACCOUNT_SID: ${ACCOUNT_SID}
       TWILIO_TOKEN: ${TWILIO_TOKEN}
       FROM_NUMBER: ${FROM_NUMBER}
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     depends_on:
       nats:
         condition: service_healthy
@@ -38,6 +38,35 @@ services:
       - ../shared/migrations:/migrations/shared
     networks:
       - default
+      
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./nginx/certs:/etc/letsencrypt
+      - ./nginx/www:/var/www/certbot
+    entrypoint: >
+      sh -c "certbot certonly --webroot
+      --webroot-path=/var/www/certbot
+      --email lookrestoapp@gmail.com
+      --agree-tos
+      --no-eff-email
+      -d app.lookresto.com 
+      && crond -f"
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/certs:/etc/letsencrypt
+      - ./nginx/www:/var/www/certbot
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - app
+    restart: unless-stopped
 
   postgres:
     image: postgis/postgis:16-3.4
