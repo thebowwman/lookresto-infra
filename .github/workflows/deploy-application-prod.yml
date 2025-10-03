@@ -417,6 +417,8 @@ jobs:
             
             # Gradual rollout: start new container before stopping old one
             docker compose -f docker-compose.base.yml -f docker-compose.prod.yml up -d --remove-orphans app
+
+            docker compose -f docker-compose.base.yml -f docker-compose.prod.yml up -d --remove-orphans nginx-proxy letsencrypt
             
             echo "⏳ Waiting for new application to start..."
             sleep 15
