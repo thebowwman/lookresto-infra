@@ -32,6 +32,8 @@ services:
     volumes:
       - ./logs:/app/logs
     restart: unless-stopped
+    networks:
+      - lookresto-net
 
   migrate:
     image: migrate/migrate:latest
