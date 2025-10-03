@@ -26,8 +26,8 @@ services:
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana_data:/var/lib/grafana
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     depends_on:
       - loki
     restart: unless-stopped
