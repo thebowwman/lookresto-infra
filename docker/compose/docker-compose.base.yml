@@ -37,3 +37,7 @@ services:
 volumes:
   nats_data:
   redis_data:
+
+networks:
+  lookresto-net:
+    external: true
