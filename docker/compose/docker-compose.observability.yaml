@@ -11,6 +11,8 @@ services:
     ports:
       - "3100:3100"
     restart: unless-stopped
+    networks:
+      - lookresto-net
 
   grafana:
     image: grafana/grafana:10.4.2
@@ -31,6 +33,8 @@ services:
     depends_on:
       - loki
     restart: unless-stopped
+    networks:
+      - lookresto-net
 
   promtail:
     image: grafana/promtail:2.9.0
@@ -43,6 +47,8 @@ services:
     user: "0"
     depends_on: [loki]
     restart: unless-stopped
+    networks:
+      - lookresto-net
 
 volumes:
   loki_data:
