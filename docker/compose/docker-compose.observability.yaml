@@ -19,7 +19,7 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
-      - ./obs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana_data:/var/lib/grafana
     ports:
       - "3000:3000"
@@ -31,8 +31,8 @@ services:
     image: grafana/promtail:2.9.0
     command: ["-config.file=/etc/promtail/config/promtail-config.yml"]
     volumes:
-      - ./obs/promtail-config.yml:/etc/promtail/config/promtail-config.yml:ro
-      - ../logs:/host_logs/restaurant:ro
+      - ./observability/promtail-config.yml:/etc/promtail/config/promtail-config.yml:ro
+      - ./logs:/host_logs/restaurant:ro
     environment:
       - HOSTNAME=${HOSTNAME:-restaurant-host}
     user: "0"
