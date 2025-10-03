@@ -231,6 +231,9 @@ jobs:
     environment:
       name: PROD
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
