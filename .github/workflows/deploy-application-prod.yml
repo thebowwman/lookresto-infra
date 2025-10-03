@@ -430,7 +430,7 @@ jobs:
           MAX_RETRIES=30
           RETRY_COUNT=0
           
-          HEALTH_URL="http://${{ steps.get-ip.outputs.lightsail_ip }}:8080/healthz"
+          HEALTH_URL="https://app.lookresto.com/healthz"
           
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
             if curl -sf "$HEALTH_URL" > /dev/null; then
@@ -449,7 +449,7 @@ jobs:
       - name: Smoke Tests
         run: |
           echo "🧪 Running smoke tests..."
-          BASE_URL="http://${{ steps.get-ip.outputs.lightsail_ip }}:8080"
+          BASE_URL="https://app.lookresto.com"
           
           # Test health endpoint
           if ! curl -sf "$BASE_URL/healthz" > /dev/null; then
