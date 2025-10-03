@@ -25,7 +25,7 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - app_logs:/app/logs
+      - ./logs:/opt/app/logs
     restart: unless-stopped
 
   migrate:
