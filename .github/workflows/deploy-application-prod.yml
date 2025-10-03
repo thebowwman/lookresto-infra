@@ -222,6 +222,65 @@ jobs:
               sleep 2
             done
           EOF
+  # ----------------------------------------------------------
+  # 🚀 New Observability Job
+  # ----------------------------------------------------------
+  deploy-observability:
+    needs: deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: PROD
+    steps:
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::341126269796:role/github-actions-role
+          aws-region: eu-west-3
+
+      - name: Get Lightsail IP
+        id: get-ip
+        run: |
+          LIGHTSAIL_IP=$(aws ssm get-parameter --name "/lightsail/prod/ip" --query "Parameter.Value" --output text)
+          echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AWS_EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ steps.get-ip.outputs.lightsail_ip }} >> ~/.ssh/known_hosts
+
+      - name: Copy Observability Files
+        run: |
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
+            $GITHUB_WORKSPACE/docker/compose/docker-compose.observability.yml \
+            ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/docker-compose.observability.yml
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -r \
+            $GITHUB_WORKSPACE/observability \
+            ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/
+
+      - name: Deploy Observability Stack
+        run: |
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << 'EOF'
+            cd /opt/app
+            echo "🚀 Starting observability stack (Grafana + Loki + Promtail)..."
+            docker compose -f docker-compose.observability.yml up -d
+          EOF
+
+      - name: Observability Health Check
+        run: |
+          GRAFANA_URL="http://${{ steps.get-ip.outputs.lightsail_ip }}:3000"
+          LOKI_URL="http://${{ steps.get-ip.outputs.lightsail_ip }}:3100/ready"
+          if curl -sf "$GRAFANA_URL/login" > /dev/null; then
+            echo "✅ Grafana is up at $GRAFANA_URL"
+          else
+            echo "⚠️ Grafana is not responding"
+          fi
+          if curl -sf "$LOKI_URL" > /dev/null; then
+            echo "✅ Loki is up at $LOKI_URL"
+          else
+            echo "⚠️ Loki is not responding"
+          fi
 
   migration-approval:
     needs: deploy
