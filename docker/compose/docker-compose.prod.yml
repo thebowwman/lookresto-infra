@@ -17,6 +17,11 @@ services:
       ACCOUNT_SID: ${ACCOUNT_SID}
       TWILIO_TOKEN: ${TWILIO_TOKEN}
       FROM_NUMBER: ${FROM_NUMBER}
+
+      VIRTUAL_HOST: app.lookresto.com
+      LETSENCRYPT_HOST: app.lookresto.com
+      LETSENCRYPT_EMAIL: lookrestoapp@gmail.com
+      
     expose:
       - "8080"
     depends_on:
@@ -39,35 +44,33 @@ services:
     networks:
       - default
       
-  certbot:
-    image: certbot/certbot
-    container_name: certbot
-    volumes:
-      - ./nginx/certs:/etc/letsencrypt
-      - ./nginx/www:/var/www/certbot
-    entrypoint: >
-      sh -c "certbot certonly --webroot
-      --webroot-path=/var/www/certbot
-      --email lookrestoapp@gmail.com
-      --agree-tos
-      --no-eff-email
-      -d app.lookresto.com 
-      && crond -f"
-
-  nginx:
-    image: nginx:latest
-    container_name: nginx
-    volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d
-      - ./nginx/certs:/etc/letsencrypt
-      - ./nginx/www:/var/www/certbot
+  nginx-proxy:
+    image: jwilder/nginx-proxy:latest
+    container_name: nginx-proxy
     ports:
       - "80:80"
       - "443:443"
-    depends_on:
-      - app
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - nginx_certs:/etc/nginx/certs:rw
+      - nginx_vhost:/etc/nginx/vhost.d
+      - nginx_html:/usr/share/nginx/html
     restart: unless-stopped
 
+  letsencrypt:
+    image: nginxproxy/acme-companion
+    container_name: letsencrypt
+    environment:
+      - DEFAULT_EMAIL=lookrestoapp@gmail.com
+    volumes_from:
+      - nginx-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - nginx_certs:/etc/nginx/certs:rw
+      - nginx_vhost:/etc/nginx/vhost.d
+      - nginx_html:/usr/share/nginx/html
+    restart: unless-stopped
+    
   postgres:
     image: postgis/postgis:16-3.4
     container_name: uat-postgres
@@ -89,3 +92,6 @@ services:
 volumes:
   postgres_data:
   app_logs:
+  nginx_certs:
+  nginx_vhost:
+  nginx_html:
