@@ -15,7 +15,7 @@ on:
         required: true
         type: boolean
         default: true
-  workflow_call:  # Add this
+  workflow_call:
     inputs:
       lightsail_ip:
         description: "Lightsail IP of the target server"
@@ -40,7 +40,6 @@ on:
         required: true
       SLACK_WEBHOOK_URL:
         required: false
-     
 
 permissions:
   id-token: write
@@ -50,6 +49,7 @@ env:
   ENVIRONMENT: uat
   IMAGE_TAG: ${{ github.event.inputs.image_tag || github.event.client_payload.version || 'latest' }}
   RUN_MIGRATIONS: ${{ github.event.inputs.run_migrations || 'true' }}
+  UAT_DOMAIN: uat.lookresto.com
 
 jobs:
   deploy:
@@ -67,11 +67,9 @@ jobs:
           role-to-assume: arn:aws:iam::341126269796:role/github-actions-role
           aws-region: eu-west-3
 
-
       - name: Get Lightsail IP from SSM
         id: get-ip
         run: |
-          # Use input if provided (from workflow_call), otherwise get from SSM
           if [ -n "${{ inputs.lightsail_ip }}" ]; then
             LIGHTSAIL_IP="${{ inputs.lightsail_ip }}"
           else
@@ -79,7 +77,6 @@ jobs:
           fi
           echo "lightsail_ip=$LIGHTSAIL_IP" >> $GITHUB_OUTPUT
           echo "Target server: $LIGHTSAIL_IP"
-      
 
       - name: Set up SSH
         run: |
@@ -99,11 +96,9 @@ jobs:
         run: |
           echo "📦 Copying migration files to server..."
           
-          # Create migrations directory on server if it doesn't exist
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} \
             'mkdir -p /opt/app/migrations'
           
-          # Copy each module's migrations
           for module in restaurant kernel notification shared user; do
             if [ -d "backend/$module/migrations" ]; then
               echo "Copying $module migrations..."
@@ -144,14 +139,15 @@ jobs:
           ENVFILE
           EOF
 
-      - name: Start Infrastructure Services (Postgres, NATS, Redis)
+      - name: Start Infrastructure Services
         run: |
           echo "🚀 Starting infrastructure services..."
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << 'EOF'
             cd /opt/app
             
-            # Start base services first (nats, redis)
-            docker compose -f docker-compose.base.yml -f docker-compose.uat.yml up postgres redis nats -d
+            # Start all infrastructure services including nginx-proxy and letsencrypt
+            docker compose -f docker-compose.base.yml -f docker-compose.uat.yml up \
+              postgres redis nats nginx-proxy letsencrypt -d
             
             echo "⏳ Waiting for services to be ready..."
             
@@ -184,6 +180,16 @@ jobs:
               echo "Waiting for Redis... ($i/30)"
               sleep 2
             done
+            
+            # Wait for nginx-proxy
+            for i in {1..30}; do
+              if docker ps | grep -q nginx-proxy-uat; then
+                echo "✅ Nginx-proxy is ready!"
+                break
+              fi
+              echo "Waiting for nginx-proxy... ($i/30)"
+              sleep 2
+            done
           EOF
 
       - name: Run Database Migrations
@@ -193,14 +199,12 @@ jobs:
           ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} bash << EOF
             cd /opt/app
             
-            # Get the docker compose network name
             NETWORK=\$(docker network ls --filter name=app --format "{{.Name}}" | head -1)
             if [ -z "\$NETWORK" ]; then
               NETWORK="app_default"
             fi
             echo "Using network: \$NETWORK"
             
-            # Run migrations for each module
             for module in restaurant user kernel notification shared; do
               if [ -d "migrations/\$module" ]; then
                 echo "Running migrations for \$module..."
@@ -226,7 +230,7 @@ jobs:
             # Pull new image
             docker pull ghcr.io/thebowwman/lookresto:${{ env.IMAGE_TAG }}
             
-            # Start the application with both compose files to resolve dependencies
+            # Start the application
             docker compose -f docker-compose.base.yml -f docker-compose.uat.yml up -d app
             
             # Wait for application to start
@@ -237,17 +241,46 @@ jobs:
             docker ps
           EOF
 
+      - name: Wait for SSL Certificate
+        run: |
+          echo "🔐 Waiting for SSL certificate to be issued..."
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} << 'EOF'
+            MAX_RETRIES=60
+            RETRY_COUNT=0
+            
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              # Check if certificate exists
+              if docker exec nginx-proxy-uat ls /etc/nginx/certs/${{ env.UAT_DOMAIN }}.crt 2>/dev/null; then
+                echo "✅ SSL certificate issued!"
+                exit 0
+              fi
+              
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "⏳ Waiting for SSL certificate... ($RETRY_COUNT/$MAX_RETRIES)"
+              sleep 5
+            done
+            
+            echo "⚠️ SSL certificate not issued yet, but continuing..."
+            docker logs letsencrypt-uat --tail 50
+          EOF
+
       - name: Health Check
         run: |
           echo "🏥 Running health check..."
           MAX_RETRIES=30
           RETRY_COUNT=0
           
-          HEALTH_URL="http://${{ steps.get-ip.outputs.lightsail_ip }}:8080/healthz"
-          
+          # Try HTTPS first, fallback to HTTP if SSL not ready
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            if curl -sf "$HEALTH_URL" > /dev/null; then
-              echo "✅ Health check passed!"
+            # Try HTTPS
+            if curl -sf --connect-timeout 5 "https://${{ env.UAT_DOMAIN }}/healthz" > /dev/null 2>&1; then
+              echo "✅ Health check passed (HTTPS)!"
+              exit 0
+            fi
+            
+            # Fallback to HTTP if HTTPS not ready
+            if curl -sf --connect-timeout 5 "http://${{ env.UAT_DOMAIN }}/healthz" > /dev/null 2>&1; then
+              echo "✅ Health check passed (HTTP - SSL may still be provisioning)!"
               exit 0
             fi
             
@@ -257,6 +290,12 @@ jobs:
           done
           
           echo "❌ Health check failed after $MAX_RETRIES attempts"
+          
+          # Debug information
+          echo "Checking nginx-proxy logs:"
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} \
+            "docker logs nginx-proxy-uat --tail 50"
+          
           exit 1
 
       - name: Deployment Summary
@@ -265,6 +304,7 @@ jobs:
           echo "### ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
           echo "**Environment:** UAT" >> $GITHUB_STEP_SUMMARY
           echo "**Image:** ghcr.io/thebowwman/lookresto:${{ env.IMAGE_TAG }}" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** https://${{ env.UAT_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
           echo "**Server IP:** ${{ steps.get-ip.outputs.lightsail_ip }}" >> $GITHUB_STEP_SUMMARY
           echo "**Deployed by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
 
@@ -277,8 +317,8 @@ jobs:
           text: |
             UAT Deployment: ${{ job.status }}
             Version: ${{ env.IMAGE_TAG }}
+            URL: https://${{ env.UAT_DOMAIN }}
             Deployed by: ${{ github.actor }}
-            Server: ${{ steps.get-ip.outputs.lightsail_ip }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
