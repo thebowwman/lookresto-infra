@@ -1,9 +1,8 @@
 version: "3.9"
-
 services:
   app:
     image: ghcr.io/thebowwman/lookresto:${APP_VERSION:-latest}
-    container_name: myapp
+    container_name: myapp-uat
     environment:
       DB_URL: ${DB_URL}
       NATS_URL: ${NATS_URL}
@@ -17,8 +16,11 @@ services:
       ACCOUNT_SID: ${ACCOUNT_SID}
       TWILIO_TOKEN: ${TWILIO_TOKEN}
       FROM_NUMBER: ${FROM_NUMBER}
-    ports:
-      - "8080:8080"
+      VIRTUAL_HOST: uat.lookresto.com
+      LETSENCRYPT_HOST: uat.lookresto.com
+      LETSENCRYPT_EMAIL: lookrestoapp@gmail.com
+    expose:
+      - "8080"
     depends_on:
       nats:
         condition: service_healthy
@@ -27,6 +29,8 @@ services:
     volumes:
       - app_logs:/app/logs
     restart: unless-stopped
+    networks:
+      - lookresto-net
 
   migrate:
     image: migrate/migrate:latest
@@ -37,7 +41,38 @@ services:
       - ../notification/migrations:/migrations/notification
       - ../shared/migrations:/migrations/shared
     networks:
-      - default
+      - lookresto-net
+
+  nginx-proxy:
+    image: jwilder/nginx-proxy:latest
+    container_name: nginx-proxy-uat
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - nginx_certs:/etc/nginx/certs:rw
+      - nginx_vhost:/etc/nginx/vhost.d
+      - nginx_html:/usr/share/nginx/html
+    restart: unless-stopped
+    networks:
+      - lookresto-net
+
+  letsencrypt:
+    image: nginxproxy/acme-companion
+    container_name: letsencrypt-uat
+    environment:
+      - DEFAULT_EMAIL=lookrestoapp@gmail.com
+    volumes_from:
+      - nginx-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - nginx_certs:/etc/nginx/certs:rw
+      - nginx_vhost:/etc/nginx/vhost.d
+      - nginx_html:/usr/share/nginx/html
+    restart: unless-stopped
+    networks:
+      - lookresto-net
 
   postgres:
     image: postgis/postgis:16-3.4
@@ -47,7 +82,7 @@ services:
       POSTGRES_PASSWORD: secret
       POSTGRES_DB: appdb
     ports:
-      - "5432:5432" # exposed for debugging, optional
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -56,7 +91,16 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - lookresto-net
 
 volumes:
   postgres_data:
   app_logs:
+  nginx_certs:
+  nginx_vhost:
+  nginx_html:
+
+networks:
+  lookresto-net:
+    driver: bridge
