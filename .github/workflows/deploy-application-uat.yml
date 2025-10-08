@@ -92,6 +92,19 @@ jobs:
           token: ${{ secrets.BACKEND_REPO_PAT || github.token }}
           path: backend
 
+
+      - name: Ensure Docker network exists
+        run: |
+          echo "🛠 Ensuring Docker network 'lookresto-net' exists..."
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} bash << 'EOF'
+            if ! docker network ls --format '{{.Name}}' | grep -wq 'lookresto-net'; then
+              echo "Creating Docker network 'lookresto-net'..."
+              docker network create lookresto-net
+            else
+              echo "Docker network 'lookresto-net' already exists."
+            fi
+          EOF
+
       - name: Copy Migrations to Server
         run: |
           echo "📦 Copying migration files to server..."
@@ -107,6 +120,7 @@ jobs:
                 ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/migrations/$module
             fi
           done
+    
 
       - name: Copy Docker Compose files
         run: |
@@ -196,14 +210,10 @@ jobs:
         if: env.RUN_MIGRATIONS == 'true'
         run: |
           echo "🔄 Running migrations..."
-          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} bash << EOF
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} bash << 'EOF'
             cd /opt/app
-            
-            NETWORK=\$(docker network ls --filter name=app --format "{{.Name}}" | head -1)
-            if [ -z "\$NETWORK" ]; then
-              NETWORK="app_default"
-            fi
-            echo "Using network: \$NETWORK"
+            NETWORK="lookresto-net"
+            echo "Using network: $NETWORK"
             
             for module in restaurant user kernel notification shared; do
               if [ -d "migrations/\$module" ]; then
