@@ -214,16 +214,16 @@ jobs:
             cd /opt/app
             NETWORK="lookresto-net"
             echo "Using network: $NETWORK"
-            
+      
             for module in restaurant user kernel notification shared; do
-              if [ -d "migrations/\$module" ]; then
-                echo "Running migrations for \$module..."
+              if [ -d "migrations/$module" ]; then
+                echo "Running migrations for $module..."
                 docker run --rm \
-                  --network \$NETWORK \
-                  -v \$(pwd)/migrations/\$module:/migrations \
+                  --network "$NETWORK" \
+                  -v "$(pwd)/migrations/$module:/migrations" \
                   migrate/migrate:latest \
                   -path=/migrations \
-                  -database "postgres://app:secret@postgres:5432/appdb?sslmode=disable&x-migrations-table=\${module}_migrations" up
+                  -database "postgres://app:secret@postgres:5432/appdb?sslmode=disable&x-migrations-table=${module}_migrations" up
               fi
             done
           EOF
