@@ -147,9 +147,10 @@ jobs:
           JWT_SECRET_KEY=${{ vars.JWT_SECRET_KEY }}
           ACCESS_TOKEN_TTL=${{ vars.ACCESS_TOKEN_TTL || '15m' }}
           REFRESH_TOKEN_TTL=${{ vars.REFRESH_TOKEN_TTL || '7d' }}
-          ACCOUNT_SID=${{ vars.TWILIO_ACCOUNT_SID }}
-          TWILIO_TOKEN=${{ vars.TWILIO_AUTH_TOKEN }}
-          FROM_NUMBER=${{ vars.TWILIO_PHONE_NUMBER }}
+          ACCOUNT_SID=${{ vars.ACCOUNT_SID }}
+          TWILIO_TOKEN=${{ vars.TWILIO_TOKEN }}
+          FROM_NUMBER=${{ vars.FROM_NUMBER }}
+          APP_URL=${{vars.APP_URL}}
           ENVFILE
           EOF
 
