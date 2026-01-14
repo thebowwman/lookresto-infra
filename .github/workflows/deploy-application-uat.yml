@@ -117,7 +117,7 @@ jobs:
           ssh -i ~/.ssh/id_rsa $SERVER "mkdir -p $DEST"
           
           for module in restaurant shared user; do
-            SRC="$module/migrations"
+            SRC="backend/$module/migrations"
             
             echo "➡️ Processing $module..."
             
