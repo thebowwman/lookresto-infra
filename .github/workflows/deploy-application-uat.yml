@@ -116,36 +116,21 @@ jobs:
       
           ssh -i ~/.ssh/id_rsa $SERVER "mkdir -p $DEST"
       
-          for module in restaurant kernel notification shared user; do
+          for module in restaurant shared user; do
+            SRC="$module/migrations"
+      
             echo "➡️ Processing $module..."
       
-            if [ "$module" = "restaurant" ]; then
-              SRC="restaurant/internal/migrations"
+            if [ -d "$SRC" ]; then
+              echo "   📂 Copying $module migrations from $SRC"
+              ssh -i ~/.ssh/id_rsa $SERVER "mkdir -p $DEST/$module"
       
-              if [ -d "$SRC" ]; then
-                echo "   🍽 Copying restaurant migrations (flattened)"
-                ssh -i ~/.ssh/id_rsa $SERVER "mkdir -p $DEST/restaurant"
-      
-                scp -i ~/.ssh/id_rsa -r \
-                  $SRC/* \
-                  $SERVER:$DEST/restaurant
-              else
-                echo "   ⚠️ Restaurant migrations not found"
-              fi
-      
+              # copy CONTENTS to avoid double nesting
+              scp -i ~/.ssh/id_rsa -r \
+                $SRC/* \
+                $SERVER:$DEST/$module
             else
-              SRC="backend/$module/migrations"
-      
-              if [ -d "$SRC" ]; then
-                echo "   📂 Copying $module migrations"
-                ssh -i ~/.ssh/id_rsa $SERVER "mkdir -p $DEST/$module"
-      
-                scp -i ~/.ssh/id_rsa -r \
-                  $SRC \
-                  $SERVER:$DEST/$module
-              else
-                echo "   ⚠️ No migrations for $module"
-              fi
+              echo "   ⚠️ No migrations found for $module"
             fi
           done
 
