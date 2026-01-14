@@ -110,27 +110,27 @@ jobs:
       - name: Copy Migrations to Server
         run: |
           echo "📦 Copying migration files to server..."
-      
+          
           SERVER="ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}"
           DEST="/opt/app/migrations"
-      
+          
           ssh -i ~/.ssh/id_rsa $SERVER "mkdir -p $DEST"
-      
+          
           for module in restaurant shared user; do
             SRC="$module/migrations"
-      
+            
             echo "➡️ Processing $module..."
-      
+            
             if [ -d "$SRC" ]; then
-              echo "   📂 Copying $module migrations from $SRC"
+              echo "   📂 Copying entire $module migrations structure"
               ssh -i ~/.ssh/id_rsa $SERVER "mkdir -p $DEST/$module"
-      
-              # copy CONTENTS to avoid double nesting
+              
+              # Copy the entire migrations directory preserving structure
               scp -i ~/.ssh/id_rsa -r \
                 $SRC/* \
-                $SERVER:$DEST/$module
+                $SERVER:$DEST/$module/
             else
-              echo "   ⚠️ No migrations found for $module"
+              echo "   ⚠️ No migrations directory found for $module"
             fi
           done
 
