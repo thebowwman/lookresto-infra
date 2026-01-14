@@ -85,12 +85,14 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ steps.get-ip.outputs.lightsail_ip }} >> ~/.ssh/known_hosts
 
+
       - name: Checkout Backend Repository
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/lookresto
-          token: ${{ secrets.BACKEND_REPO_PAT || github.token }}
+          token: ${{ secrets.BACKEND_REPO_PAT }}
           path: backend
+          fetch-depth: 0
 
 
       - name: Ensure Docker network exists
