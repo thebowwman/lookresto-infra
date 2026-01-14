@@ -110,18 +110,45 @@ jobs:
       - name: Copy Migrations to Server
         run: |
           echo "📦 Copying migration files to server..."
-          
-          ssh -i ~/.ssh/id_rsa ubuntu@${{ steps.get-ip.outputs.lightsail_ip }} \
-            'mkdir -p /opt/app/migrations'
-          
+      
+          SERVER="ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}"
+          DEST="/opt/app/migrations"
+      
+          ssh -i ~/.ssh/id_rsa $SERVER "mkdir -p $DEST"
+      
           for module in restaurant kernel notification shared user; do
-            if [ -d "backend/$module/migrations" ]; then
-              echo "Copying $module migrations..."
-              scp -i ~/.ssh/id_rsa -r \
-                backend/$module/migrations \
-                ubuntu@${{ steps.get-ip.outputs.lightsail_ip }}:/opt/app/migrations/$module
+            echo "➡️ Processing $module..."
+      
+            if [ "$module" = "restaurant" ]; then
+              SRC="restaurant/internal/migrations"
+      
+              if [ -d "$SRC" ]; then
+                echo "   🍽 Copying restaurant migrations (flattened)"
+                ssh -i ~/.ssh/id_rsa $SERVER "mkdir -p $DEST/restaurant"
+      
+                scp -i ~/.ssh/id_rsa -r \
+                  $SRC/* \
+                  $SERVER:$DEST/restaurant
+              else
+                echo "   ⚠️ Restaurant migrations not found"
+              fi
+      
+            else
+              SRC="backend/$module/migrations"
+      
+              if [ -d "$SRC" ]; then
+                echo "   📂 Copying $module migrations"
+                ssh -i ~/.ssh/id_rsa $SERVER "mkdir -p $DEST/$module"
+      
+                scp -i ~/.ssh/id_rsa -r \
+                  $SRC \
+                  $SERVER:$DEST/$module
+              else
+                echo "   ⚠️ No migrations for $module"
+              fi
             fi
           done
+
     
 
       - name: Copy Docker Compose files
